@@ -17,30 +17,27 @@
   - Windows 개발 환경에서 심볼릭/정션 링크로 연결하는 자세한 방법은 `DEV_SETUP_WINDOWS.md`를 참고하세요.
 
 ## 사용 위치
-- 3D Viewport > Sidebar(N 키) > ClipStudio 탭
-- 패널의 "Say Hello" 버튼으로 애드온 동작을 빠르게 확인할 수 있습니다.
+- 3D Viewport > Sidebar(N 키) > CSP QuickEdit 탭
 - Preferences > Add-ons > Clip Studio Bridge 항목에서 CSP 실행 경로를 설정할 수 있습니다.
 
 ### Clip Studio Paint 연동
-- CSP 경로 자동검색: Preferences 또는 N 패널에서 "CSP 경로 자동검색" 버튼 사용
-- 렌더 → CSP로 열기: 현재 3D Viewport(OpenGL) 기준으로 렌더하여 PNG로 저장하고 Clip Studio Paint로 엽니다.
-- 파일을 CSP로 열기: 파일 선택 대화상자에서 이미지/PSD/CLIP 파일을 선택해 바로 엽니다.
+- CSP 경로 자동검색: Preferences 또는 CSP QuickEdit 탭에서 "CSP 경로 자동검색" 버튼 사용
 
 메모
 - 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
-- 렌더 저장 위치는 Blender 임시 폴더 하위 `clipstudio` 디렉터리이며, UI로 경로를 설정하지 않습니다.
- - 뷰포트 패널의 CSP 경로/찾기 버튼 노출은 환경설정의 "뷰포트에 경로/찾기 표시"로 제어할 수 있습니다(기본: 표시).
+- 캡처 파일 저장 위치는 Blender 임시 폴더 하위 `clipstudio` 디렉터리이며, UI로 경로를 설정하지 않습니다.
+- 뷰포트 패널의 CSP 경로/찾기 버튼 노출은 환경설정의 "뷰포트에 경로/찾기 표시"로 제어할 수 있습니다(기본: 표시).
 
 ### Quick Edit (CSP 전용)
 - 위치: 3D Viewport > Sidebar(N) > "CSP QuickEdit" 탭
-- Start: 활성 이미지(텍스처 페인트 캔버스/이미지 에디터/활성 이미지 텍스처 노드 순)를 외부 편집기로 오픈
-  - 원본 파일이 존재하면 그 경로를 그대로 사용, 없거나 패킹된 경우 임시 파일로 저장 후 사용
-- Reload: 외부에서 저장된 내용을 블렌더 이미지에 재불러오기
-- Finish: 필요 시 수정본을 원래 경로에 덮어쓰고(옵션) 패킹되었던 경우 재패킹(옵션), 임시파일 정리(옵션)
+- Start: 현재 3D Viewport를 캡처해서 CSP로 엽니다.
+- Apply Projection (Active Obj): CSP에서 저장한 캡처 파일을 자동으로 다시 읽고, 현재 뷰포트 시점 그대로 활성 오브젝트의 원본 텍스처에 투영 적용합니다.
+- 임시파일 정리: 캡처 임시파일을 정리하고 세션을 종료합니다.
 
 주의
 - 패킹된 이미지는 Quick Edit 시작 시 임시 파일로 저장하여 편집합니다. Finish에서 "다시 패킹" 옵션으로 재패킹할 수 있습니다.
 - UDIM/타일 이미지는 현재 범위에서 제외되어 있습니다.
+ - 자동 프로젝션은 Blender 빌드에 따라 `paint.project_image` 오퍼레이터가 없을 수 있습니다. 이 경우 Texture Paint에서 수동 Project Paint를 사용하세요.
 
 ## 개발/리로드 팁
 Blender 내부에서 모듈을 빠르게 리로드하려면 Python 콘솔 또는 텍스트 에디터에서 다음을 실행합니다:

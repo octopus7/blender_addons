@@ -10,7 +10,7 @@ bl_info = {
 
 import bpy
 from bpy.types import AddonPreferences, Operator, Panel
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, BoolProperty, EnumProperty
 import os
 import sys
 import subprocess
@@ -68,7 +68,7 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
         col = layout.column()
         col.prop(self, "csp_path")
         col.prop(self, "show_path_controls_in_viewport")
-        col.operator("clipstudio.detect_path", icon='VIEWZOOM')
+        col.operator("clipstudio.detect_path", icon='FILE_REFRESH')
 
 
 # --------------------
@@ -190,7 +190,33 @@ def _ensure_quickedit_path(prefs) -> str:
     return qd
 
 
-def _find_view3d_context():
+def _find_view3d_context(ctx=None):
+    # 1) 우선, 현재 버튼을 누른 뷰포트 컨텍스트를 사용
+    if ctx is None:
+        ctx = bpy.context
+    try:
+        area = getattr(ctx, 'area', None)
+        if area and area.type == 'VIEW_3D':
+            window = getattr(ctx, 'window', None)
+            screen = window.screen if window else None
+            region = None
+            for r in area.regions:
+                if r.type == 'WINDOW':
+                    region = r
+                    break
+            if window and screen and region:
+                space = area.spaces.active if area.spaces else None
+                return {
+                    'window': window,
+                    'screen': screen,
+                    'area': area,
+                    'region': region,
+                    'space_data': space,
+                }
+    except Exception:
+        pass
+
+    # 2) 실패 시, 첫 번째 3D Viewport를 검색하여 사용
     wm = bpy.context.window_manager
     if not wm:
         return None
@@ -200,7 +226,6 @@ def _find_view3d_context():
             continue
         for area in screen.areas:
             if area.type == 'VIEW_3D':
-                # WINDOW 타입 리전 탐색
                 region = None
                 for r in area.regions:
                     if r.type == 'WINDOW':
@@ -227,7 +252,7 @@ def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> st
     # 확장자 맵핑
     want_ext = 'png' if fmt_code == 'PNG' else 'tif'
 
-    ovr = _find_view3d_context()
+    ovr = _find_view3d_context(context)
     if not ovr:
         raise RuntimeError("3D Viewport를 찾을 수 없습니다.")
 
@@ -252,6 +277,53 @@ def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> st
     return cand1
 
 
+def _create_tmp_camera_from_view(ovr):
+    scene = bpy.context.scene
+    cam_data = bpy.data.cameras.new("CSP_QE_TMP_CAM")
+    cam = bpy.data.objects.new("CSP_QE_TMP_CAM", cam_data)
+    scene.collection.objects.link(cam)
+    vl = bpy.context.view_layer
+    prev_active = vl.objects.active
+    try:
+        vl.objects.active = cam
+        with bpy.context.temp_override(**ovr):
+            try:
+                bpy.ops.view3d.camera_to_view()
+            except Exception:
+                pass
+        scene.camera = cam
+    finally:
+        if prev_active:
+            vl.objects.active = prev_active
+    return cam
+
+
+def _ensure_projector_camera(ovr) -> bpy.types.Object:
+    # 씬에 투영용 임시 카메라를 준비하고 현재 뷰에 정렬
+    scene = bpy.context.scene
+    cam = scene.objects.get("CSP_QuickEditCam")
+    if not cam:
+        cam_data = bpy.data.cameras.new("CSP_QuickEditCam")
+        cam = bpy.data.objects.new("CSP_QuickEditCam", cam_data)
+        scene.collection.objects.link(cam)
+
+    # 활성 객체로 설정하고 뷰와 일치하도록 정렬
+    view_layer = bpy.context.view_layer
+    prev_active = view_layer.objects.active
+    try:
+        view_layer.objects.active = cam
+        with bpy.context.temp_override(**ovr):
+            try:
+                bpy.ops.view3d.camera_to_view()
+            except Exception:
+                pass
+        scene.camera = cam
+    finally:
+        if prev_active:
+            view_layer.objects.active = prev_active
+    return cam
+
+
 def _session_for(img: bpy.types.Image):
     return _quick_sessions.get(img.name)
 
@@ -264,16 +336,14 @@ def _del_session(img: bpy.types.Image):
     _quick_sessions.pop(img.name, None)
 
 
-class CLIPSTUDIO_OT_hello(Operator):
-    bl_idname = "clipstudio.hello"
-    bl_label = "Say Hello"
-    bl_description = "애드온 동작 테스트"
-    bl_options = {'REGISTER', 'UNDO'}
+def _iter_target_objects(context, target: str = 'ACTIVE'):
+    if target == 'SELECTED':
+        return [ob for ob in (context.selected_objects or []) if ob and ob.type == 'MESH']
+    ob = context.active_object
+    return [ob] if (ob and ob.type == 'MESH') else []
 
-    def execute(self, context):
-        self.report({'INFO'}, "ClipStudio Add-on is working!")
-        print("[ClipStudio] Hello from the add-on")
-        return {'FINISHED'}
+
+# (삭제됨) 테스트용 헬로 오퍼레이터
 
 
 class CLIPSTUDIO_OT_detect_path(Operator):
@@ -296,76 +366,15 @@ class CLIPSTUDIO_OT_detect_path(Operator):
             return {'CANCELLED'}
 
 
-class CLIPSTUDIO_OT_open_file(Operator):
-    bl_idname = "clipstudio.open_file"
-    bl_label = "파일을 CSP로 열기"
-    bl_description = "선택한 파일을 Clip Studio Paint로 엽니다"
-
-    filepath: StringProperty(name="File Path", subtype='FILE_PATH')
-    filter_glob: StringProperty(
-        default="*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.bmp;*.psd;*.clip",
-        options={'HIDDEN'},
-    )
-
-    def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-    def execute(self, context):
-        prefs = get_prefs()
-        if not prefs or not prefs.csp_path:
-            self.report({'ERROR'}, "CSP 경로가 설정되지 않았습니다. Preferences에서 지정하세요.")
-            return {'CANCELLED'}
-        if not self.filepath:
-            self.report({'ERROR'}, "파일이 선택되지 않았습니다.")
-            return {'CANCELLED'}
-        ok = launch_csp(prefs.csp_path, self.filepath)
-        if not ok:
-            self.report({'ERROR'}, "CSP 실행에 실패했습니다. 경로를 확인하세요.")
-            return {'CANCELLED'}
-        return {'FINISHED'}
+# (삭제됨) 임의 파일 열기 오퍼레이터
 
 
-class CLIPSTUDIO_OT_export_render_open(Operator):
-    bl_idname = "clipstudio.export_render_open"
-    bl_label = "렌더를 CSP로 열기"
-    bl_description = "현재 씬을 렌더링하여 저장 후 Clip Studio Paint로 엽니다"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        prefs = get_prefs()
-        if not prefs or not prefs.csp_path:
-            self.report({'ERROR'}, "CSP 경로가 설정되지 않았습니다. Preferences에서 지정하세요.")
-            return {'CANCELLED'}
-
-        export_dir = _default_export_dir(prefs)
-        fmt_code = 'PNG'
-        ext = 'png'
-        blend_name = bpy.path.display_name_from_filepath(bpy.data.filepath) or 'untitled'
-        filename = f"{blend_name}_{_timestamp()}"
-        filepath_no_ext = os.path.join(export_dir, filename)
-        filepath = filepath_no_ext + f".{ext}"
-
-        try:
-            # 항상 뷰포트 기준(OpenGL) 렌더 사용
-            filepath = _viewport_render_to_file(context, fmt_code, filepath_no_ext)
-        except Exception as e:
-            self.report({'ERROR'}, f"렌더 저장 실패: {e}")
-            return {'CANCELLED'}
-
-        ok = launch_csp(prefs.csp_path, filepath)
-        if not ok:
-            self.report({'ERROR'}, "CSP 실행에 실패했습니다. 경로를 확인하세요.")
-            return {'CANCELLED'}
-
-        self.report({'INFO'}, f"저장 및 실행: {filepath}")
-        return {'FINISHED'}
 
 
 class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
     bl_idname = "clipstudio.quickedit_start"
     bl_label = "Quick Edit 시작 (CSP)"
-    bl_description = "활성 텍스처 이미지를 임시 파일로 저장(또는 원본 경로 사용) 후 Clip Studio Paint로 엽니다"
+    bl_description = "현재 뷰포트를 캡처하여 CSP로 열고, 원본 텍스처로 되돌아올 투영 정보를 준비합니다"
     bl_options = {'REGISTER'}
 
     def execute(self, context):
@@ -374,102 +383,64 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
             self.report({'ERROR'}, "CSP 경로가 설정되지 않았습니다. Preferences에서 지정하세요.")
             return {'CANCELLED'}
 
-        img = get_active_image(context)
-        if not img:
-            self.report({'ERROR'}, "활성 이미지가 없습니다. 이미지 에디터나 텍스처 페인트에서 이미지를 선택하세요.")
+        dest_img = get_active_image(context)
+        if not dest_img:
+            self.report({'ERROR'}, "원본이 될 활성 텍스처 이미지가 필요합니다. 이미지 에디터/텍스처 페인트/이미지 텍스처 노드를 확인하세요.")
             return {'CANCELLED'}
 
-        was_packed = bool(getattr(img, 'packed_file', None))
-        orig_path = bpy.path.abspath(img.filepath_raw or img.filepath)
-        work_path = None
+        # 3D 뷰 컨텍스트 확보 및 투영 카메라 준비
+        ovr = _find_view3d_context(context)
+        if not ovr:
+            self.report({'ERROR'}, "3D Viewport를 찾을 수 없습니다.")
+            return {'CANCELLED'}
 
+        # 뷰포트 캡처
+        qdir = _ensure_quickedit_path(prefs)
+        name = _sanitize_filename(dest_img.name)
+        basename = f"{name}_view_{_timestamp()}"
+        filepath_no_ext = os.path.join(qdir, basename)
         try:
-            if _image_has_file(img) and not was_packed:
-                # 원본 경로를 그대로 사용
-                work_path = orig_path
-            else:
-                # 임시 quickedit 경로에 저장
-                qdir = _ensure_quickedit_path(prefs)
-                name = _sanitize_filename(img.name)
-                # 확장자 추정
-                ext = os.path.splitext(orig_path)[1].lower() if orig_path else ''
-                if ext not in ('.png', '.tif', '.tiff', '.jpg', '.jpeg', '.bmp', '.psd'):
-                    ext = '.png'
-                work_path = os.path.join(qdir, f"{name}{ext}")
-
-                # 이미지 저장 (일시적으로 포맷 조정 가능)
-                prev_fp = img.filepath
-                prev_format = getattr(img, 'file_format', None)
-                try:
-                    if ext in ('.png', '.tif', '.tiff') and prev_format is not None:
-                        img.file_format = 'PNG' if ext == '.png' else 'TIFF'
-                    img.save(filepath=work_path)
-                    # 이 세션에서는 해당 경로로 reload
-                    img.filepath = work_path
-                finally:
-                    if prev_format is not None:
-                        img.file_format = prev_format
-                    # filepath는 세션 동안 work_path로 유지
-
-            _set_session(img, {
-                'orig_path': orig_path,
-                'was_packed': was_packed,
-                'work_path': work_path,
-                'started': _timestamp(),
-            })
-
-            ok = launch_csp(prefs.csp_path, work_path)
-            if not ok:
-                raise RuntimeError("CSP 실행 실패")
+            proj_path = _viewport_render_to_file(context, 'PNG', filepath_no_ext)
         except Exception as e:
-            self.report({'ERROR'}, f"Quick Edit 시작 실패: {e}")
+            self.report({'ERROR'}, f"뷰포트 캡처 실패: {e}")
             return {'CANCELLED'}
 
-        self.report({'INFO'}, f"Quick Edit 대상: {img.name}")
+        # 캡처 이미지를 블렌더에 로드
+        try:
+            proj_img = bpy.data.images.load(proj_path, check_existing=True)
+        except Exception as e:
+            self.report({'ERROR'}, f"캡처 이미지 로드 실패: {e}")
+            return {'CANCELLED'}
+
+        # 세션 저장 (키: 대상 텍스처 이미지명)
+        _set_session(dest_img, {
+            'dest_image_name': dest_img.name,
+            'proj_path': proj_path,
+            'proj_image_name': proj_img.name,
+            'started': _timestamp(),
+        })
+
+        ok = launch_csp(prefs.csp_path, proj_path)
+        if not ok:
+            self.report({'ERROR'}, "CSP 실행 실패: 경로를 확인하세요.")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, "Quick Edit 시작: 뷰포트 캡처를 CSP로 열었습니다.")
         return {'FINISHED'}
 
 
-class CLIPSTUDIO_QUICKEDIT_OT_reload(Operator):
-    bl_idname = "clipstudio.quickedit_reload"
-    bl_label = "Quick Edit 재불러오기"
-    bl_description = "외부에서 저장된 변경 사항을 이미지에 반영합니다"
-
-    def execute(self, context):
-        img = get_active_image(context)
-        if not img:
-            self.report({'ERROR'}, "활성 이미지가 없습니다.")
-            return {'CANCELLED'}
-        try:
-            img.reload()
-        except Exception as e:
-            self.report({'ERROR'}, f"재불러오기 실패: {e}")
-            return {'CANCELLED'}
-        self.report({'INFO'}, f"재불러오기 완료: {img.name}")
-        return {'FINISHED'}
 
 
 class CLIPSTUDIO_QUICKEDIT_OT_finish(Operator):
     bl_idname = "clipstudio.quickedit_finish"
-    bl_label = "Quick Edit 종료"
-    bl_description = "필요 시 원본 경로에 덮어쓰고(복원) 임시 경로를 정리합니다"
+    bl_label = "임시파일 정리"
+    bl_description = "Quick Edit 세션을 정리합니다 (선택 시 캡처 파일 삭제)"
     bl_options = {'REGISTER'}
-
-    restore_original: BoolProperty(
-        name="원본 경로 복원",
-        description="세션 시작 시 원본 파일 경로가 있었다면 수정본을 원본에 덮어쓰고 경로를 되돌립니다",
-        default=True,
-    )
-
-    repack_if_needed: BoolProperty(
-        name="다시 패킹",
-        description="시작 시 이미지가 패킹되어 있었다면 종료 시 다시 패킹합니다",
-        default=False,
-    )
 
     cleanup_temp: BoolProperty(
         name="임시파일 삭제",
-        description="Quick Edit를 위해 생성된 임시 파일을 삭제합니다 (복원 후)",
-        default=False,
+        description="Quick Edit를 위해 생성된 뷰포트 캡처 파일을 삭제합니다",
+        default=True,
     )
 
     def execute(self, context):
@@ -480,69 +451,224 @@ class CLIPSTUDIO_QUICKEDIT_OT_finish(Operator):
 
         sess = _session_for(img)
         if not sess:
-            self.report({'WARNING'}, "활성 세션 정보가 없어 경로 복원 없이 종료합니다.")
+            self.report({'WARNING'}, "활성 세션 정보가 없어 정리할 항목이 없습니다.")
             return {'FINISHED'}
 
-        work_path = sess.get('work_path')
-        orig_path = sess.get('orig_path')
-        was_packed = sess.get('was_packed')
+        proj_path = sess.get('proj_path')
+        proj_name = sess.get('proj_image_name')
 
-        try:
-            if self.restore_original and orig_path and os.path.isfile(work_path):
-                # 수정본을 원본에 덮어쓰기
-                _ensure_dir(os.path.dirname(orig_path))
-                shutil.copy2(work_path, orig_path)
-                img.filepath = orig_path
-                img.reload()
+        # 임시 파일 정리 (선택)
+        if self.cleanup_temp and proj_path and os.path.isfile(proj_path):
+            try:
+                os.remove(proj_path)
+            except Exception:
+                pass
 
-            if self.repack_if_needed and was_packed:
-                try:
-                    img.pack()
-                except Exception:
-                    pass
+        # 로드된 캡처 이미지가 있다면 재로드로 동기화만 보장
+        if proj_name and bpy.data.images.get(proj_name):
+            try:
+                bpy.data.images[proj_name].reload()
+            except Exception:
+                pass
 
-            if self.cleanup_temp and work_path and work_path != orig_path:
-                try:
-                    os.remove(work_path)
-                except Exception:
-                    pass
-        finally:
-            _del_session(img)
-
-        self.report({'INFO'}, "Quick Edit 종료")
+        _del_session(img)
+        self.report({'INFO'}, "Quick Edit 세션 정리 완료")
         return {'FINISHED'}
 
 
-class VIEW3D_PT_clipstudio(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "ClipStudio"
-    bl_label = "Clip Studio"
+class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
+    bl_idname = "clipstudio.quickedit_apply_projection"
+    bl_label = "Apply Projection (Active Obj)"
+    bl_description = "CSP에서 저장한 캡처 파일을 다시 읽고, 현재 뷰 기준으로 활성 오브젝트의 텍스처에 투영 적용합니다"
 
-    def draw(self, context):
-        layout = self.layout
-        prefs = get_prefs()
+    target: EnumProperty(
+        name="대상",
+        items=[
+            ('ACTIVE', "활성 오브젝트", "활성 오브젝트에만 적용"),
+            ('SELECTED', "선택 오브젝트(미사용)", "선택 오브젝트 전체 (향후 확장)")
+        ],
+        default='ACTIVE',
+        options={'HIDDEN'},  # UI는 일단 숨김, 확장 여지만 둠
+    )
 
-        box = layout.box()
-        row = box.row()
-        row.label(text="상태", icon='INFO')
-        if prefs and prefs.show_path_controls_in_viewport:
-            box.label(text=f"CSP 경로: {prefs.csp_path if prefs and prefs.csp_path else '(미설정)'}")
-            box.operator("clipstudio.detect_path", icon='VIEWZOOM')
-        else:
-            # 경로 UI 비표시 시, 실행 가능 상태만 간단히 표기
-            exe = bpy.path.abspath(prefs.csp_path) if (prefs and prefs.csp_path) else ""
-            ok = bool(exe and os.path.isfile(exe))
-            if ok:
-                box.label(text="사용 가능", icon='CHECKMARK')  # Blender의 체크 아이콘은 녹색 표현
-            else:
-                box.label(text="경로 미설정/실행 파일 없음", icon='ERROR')
+    def execute(self, context):
+        dest_img = get_active_image(context)
+        if not dest_img:
+            self.report({'ERROR'}, "활성 이미지가 없습니다.")
+            return {'CANCELLED'}
 
-        layout.separator()
-        col = layout.column()
-        col.operator("clipstudio.hello", icon='CHECKMARK')
-        col.operator("clipstudio.export_render_open", icon='RENDER_STILL')
-        col.operator("clipstudio.open_file", icon='FILE_FOLDER')
+        objs = _iter_target_objects(context, self.target)
+        if not objs:
+            self.report({'ERROR'}, "대상 오브젝트(메시)가 활성화되어 있지 않습니다.")
+            return {'CANCELLED'}
+
+        sess = _session_for(dest_img)
+        if not sess:
+            self.report({'ERROR'}, "Quick Edit 세션이 없습니다. 먼저 Start를 실행하세요.")
+            return {'CANCELLED'}
+
+        proj_name = sess.get('proj_image_name')
+        src_path = bpy.path.abspath(sess.get('proj_path') or "")
+        if not (src_path and os.path.isfile(src_path)):
+            self.report({'ERROR'}, "투영할 소스 파일이 없습니다. Quick Edit로 편집/저장 후 다시 시도하세요.")
+            return {'CANCELLED'}
+
+        # 소스 이미지를 별도 Image로 로드 (타깃과 동일 경로여도 check_existing으로 참조)
+        try:
+            src_img = bpy.data.images.get(proj_name) or bpy.data.images.load(src_path, check_existing=True)
+            try:
+                src_img.reload()
+            except Exception:
+                pass
+        except Exception as e:
+            self.report({'ERROR'}, f"소스 이미지 로드 실패: {e}")
+            return {'CANCELLED'}
+
+        # 3D Viewport 컨텍스트 확보
+        ovr = _find_view3d_context(context)
+        if not ovr:
+            self.report({'ERROR'}, "3D Viewport를 찾을 수 없습니다.")
+            return {'CANCELLED'}
+
+        # 카메라 전환 없이 현재 뷰포트 시점 그대로 사용
+
+        view_layer = context.view_layer
+        prev_active = view_layer.objects.active
+        prev_modes = {}
+
+        def _set_active(ob):
+            if view_layer.objects.active is not ob:
+                view_layer.objects.active = ob
+
+        try:
+            # 우선 활성 오브젝트만 처리 (확장 여지 유지)
+            target_ob = objs[0]
+            _set_active(target_ob)
+            prev_modes[target_ob.name] = target_ob.mode
+            if target_ob.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+
+            # 1) 가능하면 자동 프로젝션 오퍼레이터 사용
+            op = getattr(bpy.ops.paint, 'project_image', None)
+            if op is not None:
+                try:
+                    # Texture Paint 모드 필요 시 전환
+                    bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
+                    # 페인트 캔버스 지정
+                    ts = context.tool_settings
+                    if ts and ts.image_paint:
+                        ts.image_paint.canvas = dest_img
+                    with bpy.context.temp_override(**ovr):
+                        res = bpy.ops.paint.project_image(image=src_img.name)
+                    if res == {'FINISHED'}:
+                        return {'FINISHED'}
+                except Exception as e:
+                    print(f"[ClipStudio] project_image failed: {e}")
+
+            # 2) Fallback: 임시 카메라 + Emission 베이크로 투영 적용
+            scene = context.scene
+            prev_engine = scene.render.engine
+            tmp_cam = None
+            tmp_mat = None
+            try:
+                # 임시 카메라를 현재 뷰에 맞춤
+                tmp_cam = _create_tmp_camera_from_view(ovr)
+                scene.camera = tmp_cam
+
+                # 임시 머티리얼 구성 (Window 좌표 → 소스 이미지 → Emission)
+                tmp_mat = bpy.data.materials.new(name="CSP_QE_TMP_MAT")
+                tmp_mat.use_nodes = True
+                nt = tmp_mat.node_tree
+                for n in nt.nodes:
+                    nt.nodes.remove(n)
+                out = nt.nodes.new('ShaderNodeOutputMaterial')
+                emis = nt.nodes.new('ShaderNodeEmission')
+                img_src = nt.nodes.new('ShaderNodeTexImage')
+                img_src.image = src_img
+                img_src.interpolation = 'Linear'
+                img_src.extension = 'CLIP'
+                texcoord = nt.nodes.new('ShaderNodeTexCoord')
+                mapping = nt.nodes.new('ShaderNodeMapping')
+                # V 뒤집기 보정 (Window 좌표의 Y축 반전)
+                mapping.inputs['Scale'].default_value[1] = -1.0
+                mapping.inputs['Location'].default_value[1] = 1.0
+                nt.links.new(texcoord.outputs['Window'], mapping.inputs['Vector'])
+                nt.links.new(mapping.outputs['Vector'], img_src.inputs['Vector'])
+                nt.links.new(img_src.outputs['Color'], emis.inputs['Color'])
+                nt.links.new(emis.outputs['Emission'], out.inputs['Surface'])
+
+                # 베이크 타깃 이미지 노드 추가 및 활성화
+                img_dst = nt.nodes.new('ShaderNodeTexImage')
+                img_dst.image = dest_img
+                for n in nt.nodes:
+                    n.select = False
+                img_dst.select = True
+                nt.nodes.active = img_dst
+
+                # 대상 오브젝트에 임시 머티리얼 단일 할당
+                original_mats = [s.material for s in target_ob.material_slots]
+                target_ob.data.materials.clear()
+                target_ob.data.materials.append(tmp_mat)
+
+                # Cycles로 전환 후 Bake(EMIT)
+                scene.render.engine = 'CYCLES'
+                # 선택 상태 정리
+                for ob in bpy.context.view_layer.objects:
+                    ob.select_set(False)
+                target_ob.select_set(True)
+                _set_active(target_ob)
+                bpy.ops.object.bake(type='EMIT', margin=2, use_clear=False)
+
+                # 베이크 결과는 이미지 데이터에 즉시 반영됨. reload는 메모리 변경을 덮어쓸 수 있으므로 호출하지 않음.
+
+                # 원복
+                target_ob.data.materials.clear()
+                for m in original_mats:
+                    if m:
+                        target_ob.data.materials.append(m)
+
+                self.report({'INFO'}, "프로젝션 적용 완료 (베이크)")
+                return {'FINISHED'}
+            except Exception as e:
+                self.report({'ERROR'}, f"프로젝션 적용 실패: {e}")
+                return {'CANCELLED'}
+            finally:
+                # 카메라/머티리얼/렌더 엔진 원복 및 정리
+                try:
+                    scene.render.engine = prev_engine
+                except Exception:
+                    pass
+                if tmp_mat:
+                    try:
+                        bpy.data.materials.remove(tmp_mat, do_unlink=True)
+                    except Exception:
+                        pass
+                if tmp_cam:
+                    try:
+                        bpy.context.scene.collection.objects.unlink(tmp_cam)
+                    except Exception:
+                        pass
+                    try:
+                        bpy.data.objects.remove(tmp_cam, do_unlink=True)
+                    except Exception:
+                        pass
+        finally:
+            # 모드/활성 복원
+            for name, mode in prev_modes.items():
+                ob = bpy.data.objects.get(name)
+                if ob and ob.mode != mode:
+                    try:
+                        bpy.ops.object.mode_set(mode=mode)
+                    except Exception:
+                        pass
+            if prev_active:
+                try:
+                    view_layer.objects.active = prev_active
+                except Exception:
+                    pass
+
+        self.report({'INFO'}, "프로젝션 적용 완료 (활성 오브젝트)")
+        return {'FINISHED'}
 
 
 class VIEW3D_PT_csp_quickedit(Panel):
@@ -556,36 +682,48 @@ class VIEW3D_PT_csp_quickedit(Panel):
         prefs = get_prefs()
         img = get_active_image(context)
 
+        # 상태/경로 박스
         box = layout.box()
         row = box.row()
-        row.label(text="Clip Studio Paint", icon='BRUSH_DATA')
+        row.label(text="상태", icon='INFO')
         if prefs and prefs.show_path_controls_in_viewport:
             box.prop(prefs, "csp_path")
-            box.operator("clipstudio.detect_path", icon='VIEWZOOM')
+            box.operator("clipstudio.detect_path", icon='FILE_REFRESH')
+        else:
+            exe = bpy.path.abspath(prefs.csp_path) if (prefs and prefs.csp_path) else ""
+            ok = bool(exe and os.path.isfile(exe))
+            if ok:
+                box.label(text="사용 가능", icon='CHECKMARK')
+            else:
+                box.label(text="경로 미설정/실행 파일 없음", icon='ERROR')
 
-        layout.separator()
-        col = layout.column()
-        col.label(text=f"활성 이미지: {img.name if img else '(없음)'}")
+        # 활성 이미지 정보
+        info = layout.box()
+        info.label(text=f"활성 이미지: {img.name if img else '(없음)'}", icon='IMAGE_DATA')
         if img:
             path = bpy.path.abspath(img.filepath_raw or img.filepath)
-            col.label(text=f"경로: {path if path else '(임시/메모리)'}")
-        col.separator()
-        col.operator("clipstudio.quickedit_start", icon='EXTERNAL_DATA')
-        col.operator("clipstudio.quickedit_reload", icon='FILE_REFRESH')
-        col.operator("clipstudio.quickedit_finish", icon='CHECKMARK')
+            info.label(text=f"경로: {path if path else '(임시/메모리)'}")
+
+        layout.separator()
+        col = layout.column(align=True)
+        # (정리) 렌더를 CSP로 열기 제거, Start만 사용
+
+        layout.separator()
+        col2 = layout.column(align=True)
+        col2.operator("clipstudio.quickedit_start", icon='EXPORT')
+        col2.operator("clipstudio.quickedit_apply_projection", icon='MOD_UVPROJECT')
+        col2.operator("clipstudio.quickedit_finish", icon='TRASH')
+
+
 
 
 classes = (
     CLIPSTUDIO_Preferences,
-    CLIPSTUDIO_OT_hello,
     CLIPSTUDIO_OT_detect_path,
-    CLIPSTUDIO_OT_open_file,
-    CLIPSTUDIO_OT_export_render_open,
     CLIPSTUDIO_QUICKEDIT_OT_start,
-    CLIPSTUDIO_QUICKEDIT_OT_reload,
+    CLIPSTUDIO_QUICKEDIT_OT_apply_projection,
     CLIPSTUDIO_QUICKEDIT_OT_finish,
     VIEW3D_PT_csp_quickedit,
-    VIEW3D_PT_clipstudio,
 )
 
 
