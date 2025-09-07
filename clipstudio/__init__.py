@@ -208,6 +208,68 @@ def _ensure_quickedit_path(prefs) -> str:
     return qd
 
 
+def _find_view3d_context():
+    wm = bpy.context.window_manager
+    if not wm:
+        return None
+    for window in wm.windows:
+        screen = window.screen
+        if not screen:
+            continue
+        for area in screen.areas:
+            if area.type == 'VIEW_3D':
+                # WINDOW 타입 리전 탐색
+                region = None
+                for r in area.regions:
+                    if r.type == 'WINDOW':
+                        region = r
+                        break
+                if not region:
+                    continue
+                space = area.spaces.active if area.spaces else None
+                return {
+                    'window': window,
+                    'screen': screen,
+                    'area': area,
+                    'region': region,
+                    'space_data': space,
+                }
+    return None
+
+
+def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> str:
+    scene = context.scene
+    img_settings = scene.render.image_settings
+    prev_fmt = img_settings.file_format
+    prev_path = scene.render.filepath
+    # 확장자 맵핑
+    want_ext = 'png' if fmt_code == 'PNG' else 'tif'
+
+    ovr = _find_view3d_context()
+    if not ovr:
+        raise RuntimeError("3D Viewport를 찾을 수 없습니다.")
+
+    try:
+        img_settings.file_format = fmt_code
+        scene.render.filepath = filepath_no_ext
+        # viewport 기준 OpenGL 렌더를 파일로 저장
+        with bpy.context.temp_override(**ovr):
+            bpy.ops.render.opengl(view_context=True, write_still=True)
+    finally:
+        scene.render.filepath = prev_path
+        img_settings.file_format = prev_fmt
+
+    # Blender가 붙여 저장한 최종 경로 추정
+    cand1 = filepath_no_ext + "." + want_ext
+    cand2 = filepath_no_ext + ".tiff"
+    if os.path.isfile(cand1):
+        return cand1
+    if os.path.isfile(cand2):
+        return cand2
+    # 마지막 수단: 파일 존재 여부 무시하고 cand1 반환
+    return cand1
+
+
 def _session_for(img: bpy.types.Image):
     return _quick_sessions.get(img.name)
 
@@ -298,23 +360,28 @@ class CLIPSTUDIO_OT_export_render_open(Operator):
         fmt_code = (prefs.export_format or 'PNG')
         ext = 'png' if fmt_code == 'PNG' else 'tif'
         blend_name = bpy.path.display_name_from_filepath(bpy.data.filepath) or 'untitled'
-        filename = f"{blend_name}_{_timestamp()}.{ext}"
-        filepath = os.path.join(export_dir, filename)
+        filename = f"{blend_name}_{_timestamp()}"
+        filepath_no_ext = os.path.join(export_dir, filename)
+        filepath = filepath_no_ext + f".{ext}"
 
         try:
-            # 렌더 실행 (동기)
-            bpy.ops.render.render()
-            img = bpy.data.images.get("Render Result")
-            if not img or not img.has_data:
-                raise RuntimeError("렌더 결과가 없습니다.")
             scene = context.scene
-            img_settings = scene.render.image_settings
-            prev_fmt = img_settings.file_format
-            try:
-                img_settings.file_format = fmt_code
-                img.save_render(filepath=filepath, scene=scene)
-            finally:
-                img_settings.file_format = prev_fmt
+            if scene.camera:
+                # 카메라가 있으면 정식 렌더 → Render Result 저장
+                bpy.ops.render.render()
+                img = bpy.data.images.get("Render Result")
+                if not img or not img.has_data:
+                    raise RuntimeError("렌더 결과가 없습니다.")
+                img_settings = scene.render.image_settings
+                prev_fmt = img_settings.file_format
+                try:
+                    img_settings.file_format = fmt_code
+                    img.save_render(filepath=filepath, scene=scene)
+                finally:
+                    img_settings.file_format = prev_fmt
+            else:
+                # 카메라 없으면 뷰포트 기준 렌더로 폴백
+                filepath = _viewport_render_to_file(context, fmt_code, filepath_no_ext)
         except Exception as e:
             self.report({'ERROR'}, f"렌더 저장 실패: {e}")
             return {'CANCELLED'}

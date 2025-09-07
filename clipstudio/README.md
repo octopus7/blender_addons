@@ -24,6 +24,7 @@
 ### Clip Studio Paint 연동
 - CSP 경로 자동검색: Preferences 또는 N 패널에서 "CSP 경로 자동검색" 버튼 사용
 - 렌더 → CSP로 열기: 현재 씬을 렌더링하여 PNG/TIFF로 저장하고 Clip Studio Paint로 엽니다.
+  - 카메라가 없으면 3D Viewport 기준(OpenGL) 렌더로 자동 전환합니다.
 - 파일을 CSP로 열기: 파일 선택 대화상자에서 이미지/PSD/CLIP 파일을 선택해 바로 엽니다.
 
 메모
