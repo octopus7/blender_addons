@@ -1,5 +1,8 @@
 # Clip Studio Bridge (Blender Add-on)
 
+참고: 이 애드온은 Blender의 Quick Edit 기능(워크플로우)을 다시 구현한 것입니다. 개념과 배경은 아래 링크를 참고하세요.
+- https://www.reddit.com/r/BlenderSecrets/comments/18r9vnv/easy_texture_painting_in_blender_with_quick_edit/
+
 Blender의 3D Viewport를 캡처해 Clip Studio Paint(CSP)에서 빠르게 편집하고, 저장본을 다시 활성 오브젝트의 텍스처에 "카메라 기반 투영 + 베이크"로 반영하는 워크플로우를 제공합니다. Windows 우선 지원, Blender 4.5 LTS 이상을 대상으로 합니다.
 
 **핵심 기능**
