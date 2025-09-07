@@ -387,7 +387,58 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
     bl_description = "Capture current viewport to CSP and prepare projection back to the active texture"
     bl_options = {'REGISTER'}
 
+    cleanup_choice: EnumProperty(
+    	name="Existing CSP_QE cameras",
+    	items=[
+    		('DELETE', "Delete", "Delete found cameras"),
+    		('KEEP', "Keep", "Keep found cameras"),
+    		('CANCEL', "Cancel", "Cancel Start")
+    	],
+    	default='DELETE',
+    )
+
+    found_names: StringProperty(name="Found", default="", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        names = [obj.name for obj in bpy.data.objects if obj.type == 'CAMERA' and obj.name.startswith('CSP_QE_')]
+        if names:
+            self.found_names = "\n".join(sorted(names))
+            return context.window_manager.invoke_props_dialog(self, width=420)
+        return self.execute(context)
+
+    def draw(self, context):
+        layout = self.layout
+        if self.found_names:
+            layout.label(text="Found existing CSP_QE cameras:")
+            for nm in self.found_names.split("\n"):
+                layout.label(text=f"- {nm}")
+            layout.separator()
+            layout.prop(self, "cleanup_choice", expand=True)
+
     def execute(self, context):
+        # Handle cleanup choice
+        if self.found_names:
+            names = [n for n in self.found_names.split("\n") if n.strip()]
+            if self.cleanup_choice == 'CANCEL':
+                self.report({'INFO'}, "Start cancelled by user")
+                return {'CANCELLED'}
+            elif self.cleanup_choice == 'DELETE':
+                for nm in names:
+                    cam = bpy.data.objects.get(nm)
+                    if cam:
+                        try:
+                            # Unlink from all scenes
+                            for scn in bpy.data.scenes:
+                                try:
+                                    scn.collection.objects.unlink(cam)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        try:
+                            bpy.data.objects.remove(cam, do_unlink=True)
+                        except Exception:
+                            pass
         prefs = get_prefs()
         if not prefs or not prefs.csp_path:
             self.report({'ERROR'}, "CSP path is not set. Set it in Preferences.")
@@ -595,16 +646,56 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
             tmp_cam = None
             tmp_mat = None
             try:
-                # Start에서 생성한 카메라가 있으면 우선 사용, 없으면 즉석 생성
+                # Use saved camera from Start
                 cam_name = sess.get('cam_name')
-                cam = bpy.context.scene.objects.get(cam_name) if cam_name else None
-                created_now = False
+                cam = bpy.data.objects.get(cam_name) if cam_name else None
                 if cam is None:
-                    cam = _create_tmp_camera_from_view(vctx)
-                    created_now = True
-                scene.camera = cam
+                    raise RuntimeError("Saved camera not found. Run Start again.")
+                try:
+                    scene.camera = cam
+                except Exception:
+                    pass
 
-                # 임시 머티리얼 구성 (Window 좌표 → 소스 이미지 → Emission)
+                # Prepare temporary UV for camera projection via UV Project modifier
+                tmp_uv_name = "CSP_QE_TMP_UV"
+                uv_mod = None
+                try:
+                    me = target_ob.data
+                    if hasattr(me, 'uv_layers'):
+                        # Preserve original active UV for baking target
+                        orig_active_index = me.uv_layers.active_index if me.uv_layers.active else 0
+                        if me.uv_layers.get(tmp_uv_name) is None:
+                            me.uv_layers.new(name=tmp_uv_name)
+                            # Restore original active UV
+                            try:
+                                me.uv_layers.active_index = orig_active_index
+                            except Exception:
+                                pass
+                        # Add UV Project modifier
+                        uv_mod = target_ob.modifiers.new(name="CSP_QE_UVPROJECT", type='UV_PROJECT')
+                        try:
+                            uv_mod.uv_layer = tmp_uv_name
+                        except Exception:
+                            pass
+                        # Set projector camera
+                        try:
+                            uv_mod.projectors[0].object = cam
+                        except Exception:
+                            try:
+                                uv_mod.projectors[0] = cam
+                            except Exception:
+                                pass
+                        # Aspect from source image
+                        try:
+                            if hasattr(src_img, 'size') and len(src_img.size) >= 2:
+                                uv_mod.aspect_x = src_img.size[0]
+                                uv_mod.aspect_y = src_img.size[1]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # Temporary material (UV -> source image -> Emission)
                 tmp_mat = bpy.data.materials.new(name="CSP_QE_TMP_MAT")
                 tmp_mat.use_nodes = True
                 nt = tmp_mat.node_tree
@@ -616,13 +707,12 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                 img_src.image = src_img
                 img_src.interpolation = 'Linear'
                 img_src.extension = 'CLIP'
-                texcoord = nt.nodes.new('ShaderNodeTexCoord')
-                mapping = nt.nodes.new('ShaderNodeMapping')
-                # V 뒤집기 보정 (Window 좌표의 Y축 반전)
-                mapping.inputs['Scale'].default_value[1] = -1.0
-                mapping.inputs['Location'].default_value[1] = 1.0
-                nt.links.new(texcoord.outputs['Window'], mapping.inputs['Vector'])
-                nt.links.new(mapping.outputs['Vector'], img_src.inputs['Vector'])
+                uvmap = nt.nodes.new('ShaderNodeUVMap')
+                try:
+                    uvmap.uv_map = tmp_uv_name
+                except Exception:
+                    pass
+                nt.links.new(uvmap.outputs['UV'], img_src.inputs['Vector'])
                 nt.links.new(img_src.outputs['Color'], emis.inputs['Color'])
                 nt.links.new(emis.outputs['Emission'], out.inputs['Surface'])
 
@@ -650,11 +740,25 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
 
                 # 베이크 결과는 이미지 데이터에 즉시 반영됨. reload는 메모리 변경을 덮어쓸 수 있으므로 호출하지 않음.
 
-                # 원복
+                # Restore materials
                 target_ob.data.materials.clear()
                 for m in original_mats:
                     if m:
                         target_ob.data.materials.append(m)
+
+                # Remove temp UV modifier and UV map
+                try:
+                    if uv_mod:
+                        target_ob.modifiers.remove(uv_mod)
+                except Exception:
+                    pass
+                try:
+                    me = target_ob.data
+                    uv = me.uv_layers.get(tmp_uv_name) if hasattr(me, 'uv_layers') else None
+                    if uv:
+                        me.uv_layers.remove(uv)
+                except Exception:
+                    pass
 
                 self.report({'INFO'}, "Projection applied (Bake)")
                 return {'FINISHED'}
