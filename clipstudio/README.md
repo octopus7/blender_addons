@@ -19,16 +19,16 @@
 ## 사용 위치
 - 3D Viewport > Sidebar(N 키) > ClipStudio 탭
 - 패널의 "Say Hello" 버튼으로 애드온 동작을 빠르게 확인할 수 있습니다.
-- Preferences > Add-ons > Clip Studio Bridge 항목에서 경로나 옵션을 설정할 수 있습니다.
+- Preferences > Add-ons > Clip Studio Bridge 항목에서 CSP 실행 경로를 설정할 수 있습니다.
 
 ### Clip Studio Paint 연동
 - CSP 경로 자동검색: Preferences 또는 N 패널에서 "CSP 경로 자동검색" 버튼 사용
-- 렌더 → CSP로 열기: 현재 씬을 렌더링하여 PNG/TIFF로 저장하고 Clip Studio Paint로 엽니다.
-  - 카메라가 없으면 3D Viewport 기준(OpenGL) 렌더로 자동 전환합니다.
+- 렌더 → CSP로 열기: 현재 3D Viewport(OpenGL) 기준으로 렌더하여 PNG로 저장하고 Clip Studio Paint로 엽니다.
 - 파일을 CSP로 열기: 파일 선택 대화상자에서 이미지/PSD/CLIP 파일을 선택해 바로 엽니다.
 
 메모
 - 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
+- 렌더 저장 위치는 Blender 임시 폴더 하위 `clipstudio` 디렉터리이며, UI로 경로를 설정하지 않습니다.
 
 ### Quick Edit (CSP 전용)
 - 위치: 3D Viewport > Sidebar(N) > "CSP QuickEdit" 탭

@@ -10,7 +10,7 @@ bl_info = {
 
 import bpy
 from bpy.types import AddonPreferences, Operator, Panel
-from bpy.props import StringProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, BoolProperty
 import os
 import sys
 import subprocess
@@ -57,36 +57,10 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
         default=CSP_DEFAULT_PATH,
     )
 
-    auto_export: BoolProperty(
-        name="자동 내보내기",
-        description="작업 시 자동으로 내보내기 동작을 수행",
-        default=False,
-    )
-
-    export_dir: StringProperty(
-        name="내보내기 폴더",
-        subtype='DIR_PATH',
-        description="렌더 결과를 임시 저장할 폴더 (비우면 임시폴더)",
-        default="",
-    )
-
-    export_format: EnumProperty(
-        name="포맷",
-        description="렌더 결과 저장 포맷",
-        items=[
-            ("PNG", "PNG", "PNG 포맷으로 저장"),
-            ("TIFF", "TIFF", "TIFF 포맷으로 저장"),
-        ],
-        default="PNG",
-    )
-
     def draw(self, context):
         layout = self.layout
         col = layout.column()
         col.prop(self, "csp_path")
-        col.prop(self, "auto_export")
-        col.prop(self, "export_dir")
-        col.prop(self, "export_format")
         col.operator("clipstudio.detect_path", icon='VIEWZOOM')
 
 
@@ -143,7 +117,8 @@ def launch_csp(csp_path: str, file_to_open: str | None = None) -> bool:
 
 
 def _default_export_dir(prefs: CLIPSTUDIO_Preferences | None) -> str:
-    base = bpy.path.abspath(prefs.export_dir) if (prefs and prefs.export_dir) else bpy.app.tempdir
+    # UI에서 경로를 받지 않으므로 Blender의 임시 폴더를 기본 사용
+    base = bpy.app.tempdir
     if not base:
         base = os.path.expanduser("~")
     path = os.path.join(base, "clipstudio")
@@ -357,31 +332,16 @@ class CLIPSTUDIO_OT_export_render_open(Operator):
             return {'CANCELLED'}
 
         export_dir = _default_export_dir(prefs)
-        fmt_code = (prefs.export_format or 'PNG')
-        ext = 'png' if fmt_code == 'PNG' else 'tif'
+        fmt_code = 'PNG'
+        ext = 'png'
         blend_name = bpy.path.display_name_from_filepath(bpy.data.filepath) or 'untitled'
         filename = f"{blend_name}_{_timestamp()}"
         filepath_no_ext = os.path.join(export_dir, filename)
         filepath = filepath_no_ext + f".{ext}"
 
         try:
-            scene = context.scene
-            if scene.camera:
-                # 카메라가 있으면 정식 렌더 → Render Result 저장
-                bpy.ops.render.render()
-                img = bpy.data.images.get("Render Result")
-                if not img or not img.has_data:
-                    raise RuntimeError("렌더 결과가 없습니다.")
-                img_settings = scene.render.image_settings
-                prev_fmt = img_settings.file_format
-                try:
-                    img_settings.file_format = fmt_code
-                    img.save_render(filepath=filepath, scene=scene)
-                finally:
-                    img_settings.file_format = prev_fmt
-            else:
-                # 카메라 없으면 뷰포트 기준 렌더로 폴백
-                filepath = _viewport_render_to_file(context, fmt_code, filepath_no_ext)
+            # 항상 뷰포트 기준(OpenGL) 렌더 사용
+            filepath = _viewport_render_to_file(context, fmt_code, filepath_no_ext)
         except Exception as e:
             self.report({'ERROR'}, f"렌더 저장 실패: {e}")
             return {'CANCELLED'}
@@ -561,9 +521,6 @@ class VIEW3D_PT_clipstudio(Panel):
         row.label(text="상태", icon='INFO')
         box.label(text=f"CSP 경로: {prefs.csp_path if prefs and prefs.csp_path else '(미설정)'}")
         if prefs:
-            box.prop(prefs, "auto_export")
-            box.prop(prefs, "export_format")
-            box.prop(prefs, "export_dir")
             box.operator("clipstudio.detect_path", icon='VIEWZOOM')
 
         layout.separator()
