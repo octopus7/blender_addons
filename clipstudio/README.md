@@ -14,6 +14,7 @@
   - `~/.config/blender/<버전>/scripts/addons/` (Linux)
 
   위 경로의 `addons` 폴더에 본 저장소 폴더 이름을 `clipstudio`로 두고 그대로 복사(또는 심볼릭 링크)하면 됩니다.
+  - Windows 개발 환경에서 심볼릭/정션 링크로 연결하는 자세한 방법은 `DEV_SETUP_WINDOWS.md`를 참고하세요.
 
 ## 사용 위치
 - 3D Viewport > Sidebar(N 키) > ClipStudio 탭
