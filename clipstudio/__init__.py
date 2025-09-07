@@ -51,6 +51,167 @@ CAPTURE_PIXEL_ASPECT_Y = 1.0
 
 
 # --------------------
+# i18n (UI only)
+# --------------------
+
+# Supported UI languages: 'en', 'ko', 'ja'
+I18N = {
+    'UI Language': {
+        'en': 'UI Language',
+        'ko': 'UI 언어',
+        'ja': 'UI言語',
+    },
+    'Auto (OS)': {
+        'en': 'Auto (OS)',
+        'ko': '자동 (OS 기준)',
+        'ja': '自動 (OS)',
+    },
+    'English': {
+        'en': 'English',
+        'ko': '영어',
+        'ja': '英語',
+    },
+    'Korean': {
+        'en': 'Korean',
+        'ko': '한국어',
+        'ja': '韓国語',
+    },
+    'Japanese': {
+        'en': 'Japanese',
+        'ko': '일본어',
+        'ja': '日本語',
+    },
+    'Status': {
+        'en': 'Status',
+        'ko': '상태',
+        'ja': 'ステータス',
+    },
+    'Clip Studio Path': {
+        'en': 'Clip Studio Path',
+        'ko': '클립 스튜디오 경로',
+        'ja': 'CLIP STUDIO パス',
+    },
+    'Show Path Controls in Viewport': {
+        'en': 'Show Path Controls in Viewport',
+        'ko': '뷰포트에서 경로 설정 표시',
+        'ja': 'ビューポートでパス設定を表示',
+    },
+    'Detect Path': {
+        'en': 'Detect Path',
+        'ko': '경로 자동 감지',
+        'ja': 'パスを検出',
+    },
+    'Available': {
+        'en': 'Available',
+        'ko': '확인됨',
+        'ja': '利用可能',
+    },
+    'Path not set / Executable missing': {
+        'en': 'Path not set / Executable missing',
+        'ko': '경로 미지정 / 실행 파일 없음',
+        'ja': 'パス未設定 / 実行ファイルなし',
+    },
+    'Active Image': {
+        'en': 'Active Image',
+        'ko': '활성 이미지',
+        'ja': 'アクティブ画像',
+    },
+    'Path': {
+        'en': 'Path',
+        'ko': '경로',
+        'ja': 'パス',
+    },
+    'Start Quick Edit (CSP)': {
+        'en': 'Start Quick Edit (CSP)',
+        'ko': '퀵 에딧 시작 (CSP)',
+        'ja': 'クイック編集開始 (CSP)',
+    },
+    'Apply Projection (Active Obj)': {
+        'en': 'Apply Projection (Active Obj)',
+        'ko': '프로젝션 적용 (활성 오브젝트)',
+        'ja': '投影を適用（アクティブ）',
+    },
+    'Clean Temporary Files': {
+        'en': 'Clean Temporary Files',
+        'ko': '임시 파일 정리',
+        'ja': '一時ファイルを削除',
+    },
+    'Found existing CSP_QE cameras:': {
+        'en': 'Found existing CSP_QE cameras:',
+        'ko': '기존 CSP_QE 카메라를 찾았습니다:',
+        'ja': '既存のCSP_QEカメラが見つかりました:',
+    },
+    'Existing CSP_QE cameras': {
+        'en': 'Existing CSP_QE cameras',
+        'ko': '기존 CSP_QE 카메라',
+        'ja': '既存のCSP_QEカメラ',
+    },
+    'Console logs are always English.': {
+        'en': 'Console logs are always English.',
+        'ko': '콘솔 로그는 항상 영어입니다.',
+        'ja': 'コンソールログは常に英語です。',
+    },
+    'Detected OS language': {
+        'en': 'Detected OS language',
+        'ko': '감지된 OS 언어',
+        'ja': '検出されたOS言語',
+    },
+}
+
+
+def _detect_os_lang_code() -> str:
+    """Return 'ko', 'ja', or 'en' from OS locale."""
+    try:
+        import sys as _sys, os as _os, locale as _locale
+        if _sys.platform.startswith('win'):
+            try:
+                import ctypes
+                langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+                msg = _locale.windows_locale.get(int(langid), '') or ''
+                msg = msg.lower()
+            except Exception:
+                msg = ''
+        else:
+            msg = ''
+            for var in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
+                val = _os.environ.get(var)
+                if val:
+                    msg = val
+                    break
+            msg = (msg or '').split('.')[0].split('@')[0].lower()
+        if msg.startswith('ko'):
+            return 'ko'
+        if msg.startswith('ja'):
+            return 'ja'
+        if msg.startswith('en'):
+            return 'en'
+    except Exception:
+        pass
+    return 'en'
+
+
+def _get_effective_ui_lang(prefs=None) -> str:
+    prefs = prefs or get_prefs()
+    code = 'en'
+    try:
+        if prefs and getattr(prefs, 'ui_language', 'AUTO') != 'AUTO':
+            code = {'EN': 'en', 'KO': 'ko', 'JA': 'ja'}.get(prefs.ui_language, 'en')
+        else:
+            code = _detect_os_lang_code()
+    except Exception:
+        code = 'en'
+    return code
+
+
+def _t(key: str) -> str:
+    try:
+        lang = _get_effective_ui_lang()
+        return I18N.get(key, {}).get(lang, I18N.get(key, {}).get('en', key))
+    except Exception:
+        return key
+
+
+# --------------------
 # Debug helpers
 # --------------------
 
@@ -136,6 +297,25 @@ def get_prefs():
 class CLIPSTUDIO_Preferences(AddonPreferences):
     bl_idname = __package__ or __name__
 
+    ui_language: EnumProperty(
+        name="UI Language",
+        description="Language for add-on UI (console logs remain English)",
+        items=(
+            ('AUTO', 'Auto (OS)', 'Detect from OS language'),
+            ('EN', 'English', 'English UI'),
+            ('KO', '한국어', 'Korean UI'),
+            ('JA', '日本語', 'Japanese UI'),
+        ),
+        default='AUTO',
+    )
+
+    did_auto_lang_init: BoolProperty(
+        name="_lang_init",
+        description="Internal flag: auto language initialized",
+        default=False,
+        options={'HIDDEN'},
+    )
+
     csp_path: StringProperty(
         name="Clip Studio Path",
         subtype='FILE_PATH',
@@ -152,9 +332,19 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
     def draw(self, context):
         layout = self.layout
         col = layout.column()
-        col.prop(self, "csp_path")
-        col.prop(self, "show_path_controls_in_viewport")
-        col.operator("clipstudio.detect_path", icon='FILE_REFRESH')
+        # Language selection (UI only)
+        col.prop(self, "ui_language", text=_t('UI Language'))
+        try:
+            det = _detect_os_lang_code()
+            det_label = {'en': 'English', 'ko': 'Korean', 'ja': 'Japanese'}.get(det, 'English')
+            layout.label(text=f"{_t('Detected OS language')}: {det_label}")
+        except Exception:
+            pass
+        layout.label(text=_t('Console logs are always English.'))
+        layout.separator()
+        col.prop(self, "csp_path", text=_t('Clip Studio Path'))
+        col.prop(self, "show_path_controls_in_viewport", text=_t('Show Path Controls in Viewport'))
+        col.operator("clipstudio.detect_path", icon='FILE_REFRESH', text=_t('Detect Path'))
 
 
 # --------------------
@@ -702,11 +892,11 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
     def draw(self, context):
         layout = self.layout
         if self.found_names:
-            layout.label(text="Found existing CSP_QE cameras:")
+            layout.label(text=_t('Found existing CSP_QE cameras:'))
             for nm in self.found_names.split("\n"):
                 layout.label(text=f"- {nm}")
             layout.separator()
-            layout.prop(self, "cleanup_choice", expand=True)
+            layout.prop(self, "cleanup_choice", expand=True, text=_t('Existing CSP_QE cameras'))
 
     def execute(self, context):
         # Handle cleanup choice
@@ -1237,24 +1427,24 @@ class VIEW3D_PT_csp_quickedit(Panel):
         # 상태/경로 박스
         box = layout.box()
         row = box.row()
-        row.label(text="Status", icon='INFO')
+        row.label(text=_t('Status'), icon='INFO')
         if prefs and prefs.show_path_controls_in_viewport:
-            box.prop(prefs, "csp_path")
-            box.operator("clipstudio.detect_path", icon='FILE_REFRESH')
+            box.prop(prefs, "csp_path", text=_t('Clip Studio Path'))
+            box.operator("clipstudio.detect_path", icon='FILE_REFRESH', text=_t('Detect Path'))
         else:
             exe = bpy.path.abspath(prefs.csp_path) if (prefs and prefs.csp_path) else ""
             ok = bool(exe and os.path.isfile(exe))
             if ok:
-                box.label(text="Available", icon='CHECKMARK')
+                box.label(text=_t('Available'), icon='CHECKMARK')
             else:
-                box.label(text="Path not set / Executable missing", icon='ERROR')
+                box.label(text=_t('Path not set / Executable missing'), icon='ERROR')
 
         # 활성 이미지 정보
         info = layout.box()
-        info.label(text=f"Active Image: {img.name if img else '(None)'}", icon='IMAGE_DATA')
+        info.label(text=f"{_t('Active Image')}: {img.name if img else '(None)'}", icon='IMAGE_DATA')
         if img:
             path = bpy.path.abspath(img.filepath_raw or img.filepath)
-            info.label(text=f"Path: {path if path else '(temp/memory)'}")
+            info.label(text=f"{_t('Path')}: {path if path else '(temp/memory)'}")
 
         layout.separator()
         col = layout.column(align=True)
@@ -1262,9 +1452,9 @@ class VIEW3D_PT_csp_quickedit(Panel):
 
         layout.separator()
         col2 = layout.column(align=True)
-        col2.operator("clipstudio.quickedit_start", icon='EXPORT')
-        col2.operator("clipstudio.quickedit_apply_projection", icon='MOD_UVPROJECT')
-        col2.operator("clipstudio.quickedit_finish", icon='TRASH')
+        col2.operator("clipstudio.quickedit_start", icon='EXPORT', text=_t('Start Quick Edit (CSP)'))
+        col2.operator("clipstudio.quickedit_apply_projection", icon='MOD_UVPROJECT', text=_t('Apply Projection (Active Obj)'))
+        col2.operator("clipstudio.quickedit_finish", icon='TRASH', text=_t('Clean Temporary Files'))
 
 
 
@@ -1279,10 +1469,31 @@ classes = (
 )
 
 
+def _maybe_init_language_pref():
+    try:
+        prefs = get_prefs()
+        if not prefs:
+            return
+        if not getattr(prefs, 'did_auto_lang_init', False):
+            code = _detect_os_lang_code()
+            if code == 'ko':
+                prefs.ui_language = 'KO'
+            elif code == 'ja':
+                prefs.ui_language = 'JA'
+            else:
+                prefs.ui_language = 'EN'
+            prefs.did_auto_lang_init = True
+            print(f"[ClipStudio] UI Language initialized to: {prefs.ui_language}")
+    except Exception as e:
+        print(f"[ClipStudio] UI Language init failed: {e}")
+
+
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     print("[ClipStudio] Registered")
+    # Initialize language preference on first install/use
+    _maybe_init_language_pref()
 
 
 def unregister():
