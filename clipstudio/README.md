@@ -1,6 +1,6 @@
 # Clip Studio Bridge (Blender Add-on)
 
-블렌더용 Clip Studio 연동을 염두에 둔 기본 애드온 스켈레톤입니다. 현재는 동작 확인용 패널/오퍼레이터와 애드온 환경설정만 포함되어 있습니다.
+Blender와 Clip Studio Paint(CSP) 간 텍스처 Quick Edit 브리지입니다. 현재 보이는 3D Viewport를 캡처하여 CSP에서 편집하고, 저장된 편집본을 다시 Blender의 활성 오브젝트 텍스처에 투영(프로젝션)해서 즉시 반영합니다. Windows 우선, Blender 4.5 LTS 이상을 대상으로 합니다.
 
 ## 설치 방법
 - 방법 A: ZIP 설치
@@ -17,11 +17,11 @@
   - Windows 개발 환경에서 심볼릭/정션 링크로 연결하는 자세한 방법은 `DEV_SETUP_WINDOWS.md`를 참고하세요.
 
 ## 사용 위치
-- 3D Viewport > Sidebar(N 키) > CSP QuickEdit 탭
+- 3D Viewport > Sidebar(N 키) > Clip Studio Bridge 탭
 - Preferences > Add-ons > Clip Studio Bridge 항목에서 CSP 실행 경로를 설정할 수 있습니다.
 
 ### Clip Studio Paint 연동
-- CSP 경로 자동검색: Preferences 또는 CSP QuickEdit 탭에서 "CSP 경로 자동검색" 버튼 사용
+- CSP 경로 자동검색: Preferences 또는 Clip Studio Bridge 탭에서 "CSP 경로 자동검색" 버튼 사용
 
 메모
 - 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
@@ -29,15 +29,14 @@
 - 뷰포트 패널의 CSP 경로/찾기 버튼 노출은 환경설정의 "뷰포트에 경로/찾기 표시"로 제어할 수 있습니다(기본: 표시).
 
 ### Quick Edit (CSP 전용)
-- 위치: 3D Viewport > Sidebar(N) > "CSP QuickEdit" 탭
+- 위치: 3D Viewport > Sidebar(N) > "Clip Studio Bridge" 탭
 - Start: 현재 3D Viewport를 캡처해서 CSP로 엽니다.
 - Apply Projection (Active Obj): CSP에서 저장한 캡처 파일을 자동으로 다시 읽고, 현재 뷰포트 시점 그대로 활성 오브젝트의 원본 텍스처에 투영 적용합니다.
 - 임시파일 정리: 캡처 임시파일을 정리하고 세션을 종료합니다.
 
 주의
-- 패킹된 이미지는 Quick Edit 시작 시 임시 파일로 저장하여 편집합니다. Finish에서 "다시 패킹" 옵션으로 재패킹할 수 있습니다.
 - UDIM/타일 이미지는 현재 범위에서 제외되어 있습니다.
- - 자동 프로젝션은 Blender 빌드에 따라 `paint.project_image` 오퍼레이터가 없을 수 있습니다. 이 경우 Texture Paint에서 수동 Project Paint를 사용하세요.
+- 자동 프로젝션 API가 없는 빌드에서는 내부적으로 임시 카메라 + 베이크 방식으로 투영합니다.
 
 ## 개발/리로드 팁
 Blender 내부에서 모듈을 빠르게 리로드하려면 Python 콘솔 또는 텍스트 에디터에서 다음을 실행합니다:
