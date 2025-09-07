@@ -1,66 +1,79 @@
 # Clip Studio Bridge (Blender Add-on)
 
-Blender와 Clip Studio Paint(CSP) 간 텍스처 Quick Edit 브리지입니다. 현재 보이는 3D Viewport를 캡처하여 CSP에서 편집하고, 저장된 편집본을 다시 Blender의 활성 오브젝트 텍스처에 투영(프로젝션)해서 즉시 반영합니다. Windows 우선, Blender 4.5 LTS 이상을 대상으로 합니다.
+Blender의 3D Viewport를 캡처해 Clip Studio Paint(CSP)에서 빠르게 편집하고, 저장본을 다시 활성 오브젝트의 텍스처에 "카메라 기반 투영 + 베이크"로 반영하는 워크플로우를 제공합니다. Windows 우선 지원, Blender 4.5 LTS 이상을 대상으로 합니다.
 
-## 설치 방법
+**핵심 기능**
+- 뷰포트 캡처 → CSP 자동 실행/열기 → 저장 → Blender로 즉시 투영(프로젝션)
+- 캡처 해상도 고정: 1:1 정사각(기본 2048x2048), 색 관리 Standard/sRGB로 통일
+- 프로젝션은 Cycles EMIT 베이크로 적용(임시 UV/머티리얼/모디파이어는 자동 정리)
+- UI 언어: 자동(OS) + English/한국어/日本語 지원
+- 뷰포트 패널에서 CSP 경로 표시/자동 감지(표시/숨김 토글 가능)
+
+**요구사항**
+- Blender 4.5 LTS 이상
+- Windows 권장(우선 지원). macOS/Linux는 수동 경로 지정 시 동작 가능(자동검색 미지원)
+- Clip Studio Paint 설치
+
+**설치**
 - 방법 A: ZIP 설치
-  1) 이 폴더(clipstudio) 전체를 ZIP으로 압축합니다.
-  2) Blender > Edit > Preferences > Add-ons > Install...
-  3) 생성한 ZIP 파일을 선택하고 설치/활성화합니다.
+  - 이 폴더(`clipstudio`) 전체를 ZIP으로 압축
+  - Blender > `Edit > Preferences > Add-ons > Install...`
+  - ZIP 선택 후 설치/활성화
+- 방법 B: 로컬(개발용) 설치
+  - 애드온 폴더에 본 폴더를 `clipstudio` 이름으로 배치
+    - Windows: `%APPDATA%/Blender Foundation/Blender/<버전>/scripts/addons/`
+    - macOS: `~/Library/Application Support/Blender/<버전>/scripts/addons/`
+    - Linux: `~/.config/blender/<버전>/scripts/addons/`
+  - Windows 개발 환경에서 링크(정션/심볼릭)로 연결하려면 `DEV_SETUP_WINDOWS.md` 참고
 
-- 방법 B: 개발용 로컬 설치
-  - `%APPDATA%/Blender Foundation/Blender/<버전>/scripts/addons/` (Windows)
-  - `~/Library/Application Support/Blender/<버전>/scripts/addons/` (macOS)
-  - `~/.config/blender/<버전>/scripts/addons/` (Linux)
+**처음 설정**
+- 위치: `Edit > Preferences > Add-ons > Clip Studio Bridge`
+- `클립 스튜디오 경로(Clip Studio Path)`를 지정하거나 `경로 자동 감지(Detect Path)` 버튼 사용
+- `뷰포트에서 경로 설정 표시(Show Path Controls in Viewport)` 토글로 뷰포트 패널의 경로 UI 노출 제어
+- `UI 언어(UI Language)`: Auto(OS)/English/한국어/日本語 선택 가능(콘솔 로그는 항상 영어)
 
-  위 경로의 `addons` 폴더에 본 저장소 폴더 이름을 `clipstudio`로 두고 그대로 복사(또는 심볼릭 링크)하면 됩니다.
-  - Windows 개발 환경에서 심볼릭/정션 링크로 연결하는 자세한 방법은 `DEV_SETUP_WINDOWS.md`를 참고하세요.
+**사용 위치**
+- 3D Viewport > 사이드바(N) > `Clip Studio Bridge` 패널
 
-## 사용 위치
-- 3D Viewport > Sidebar(N 키) > Clip Studio Bridge 탭
-- Preferences > Add-ons > Clip Studio Bridge 항목에서 CSP 실행 경로를 설정할 수 있습니다.
+**퀵 스타트**
+- 활성 이미지 준비(다음 중 하나)
+  - Texture Paint 캔버스, 또는
+  - Image Editor의 활성 이미지, 또는
+  - 머티리얼 노드의 활성 Image Texture 노드
+- `Start Quick Edit (CSP)` 실행
+  - 현재 뷰를 기준으로 임시 카메라(`CSP_QE_CAM_*`) 생성
+  - 1:1 정사각 PNG로 캡처 후 CSP에서 자동으로 열기
+- CSP에서 편집/저장(같은 파일에 저장)
+- Blender로 돌아와 `Apply Projection (Active Obj)` 실행
+  - 현재 뷰 시점 그대로 활성 오브젝트의 텍스처에 투영하여 EMIT 베이크로 반영
+  - 임시 UV(`CSP_QE_TMP_UV`), UV Project 모디파이어(`CSP_QE_UVPROJECT`), 임시 머티리얼(`CSP_QE_TMP_MAT`)은 자동 관리/정리
+- 필요 시 `Clean Temporary Files`로 캡처 파일/세션 리소스 정리(이전 씬 카메라도 복원)
 
-### Clip Studio Paint 연동
-- CSP 경로 자동검색: Preferences 또는 Clip Studio Bridge 탭에서 "CSP 경로 자동검색" 버튼 사용
+**임시 파일/카메라**
+- 저장 위치: Blender 임시 폴더(`bpy.app.tempdir`) 하위 `clipstudio/quickedit`
+- 카메라: `CSP_QE_CAM_<타임스탬프>`
+  - Start 시 기존 `CSP_QE_` 카메라가 있으면 삭제/유지/취소를 선택하는 확인 대화상자가 표시됩니다.
 
-메모
-- 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
-- 캡처 파일 저장 위치는 Blender 임시 폴더 하위 `clipstudio` 디렉터리이며, UI로 경로를 설정하지 않습니다.
-- 뷰포트 패널의 CSP 경로/찾기 버튼 노출은 환경설정의 "뷰포트에 경로/찾기 표시"로 제어할 수 있습니다(기본: 표시).
+**알려진 제한 및 주의**
+- UDIM/타일 이미지 미지원
+- `Selected Objects` 대상 일괄 적용은 미구현(향후)
+- 캡처는 뷰포트(OpenGL) 기반이며, 텍스처 색상 기준으로 Flat/Unlit에 가깝게 저장되고 오버레이는 비활성화됩니다.
+- 프로젝션 시 렌더 엔진을 일시적으로 Cycles로 전환해 EMIT 베이크를 수행합니다.
+- 캡처/베이크 해상도는 세션 기준 1:1 정사각으로 고정됩니다(기본 2048x2048).
 
-### Quick Edit (CSP 전용)
-- 위치: 3D Viewport > Sidebar(N) > "Clip Studio Bridge" 탭
-- Start: 현재 3D Viewport를 캡처해서 CSP로 엽니다.
-- Apply Projection (Active Obj): CSP에서 저장한 캡처 파일을 자동으로 다시 읽고, 현재 뷰포트 시점 그대로 활성 오브젝트의 원본 텍스처에 투영 적용합니다.
-- 임시파일 정리: 캡처 임시파일을 정리하고 세션을 종료합니다.
+**문제 해결**
+- CSP 경로 미설정: Preferences에서 경로 지정 또는 `경로 자동 감지` 사용
+- 활성 이미지 없음: Image Editor/Texture Paint/노드 에디터에서 활성 이미지를 선택
+- 3D Viewport not found: 3D Viewport의 사이드바에서 버튼을 실행했는지 확인
+- Source capture not found: CSP에서 편집본을 저장했는지 확인(임시 폴더 접근 권한 포함)
+- 베이크 실패: 활성 오브젝트가 Mesh인지, Cycles 사용 가능 여부 확인
 
-주의
-- UDIM/타일 이미지는 현재 범위에서 제외되어 있습니다.
-- 자동 프로젝션 API가 없는 빌드에서는 내부적으로 임시 카메라 + 베이크 방식으로 투영합니다.
+**호환성**
+- Blender 4.5 LTS 이상
+- Windows 우선 지원(경로 자동검색 포함). macOS/Linux는 경로 수동 지정으로 사용 가능
 
-## 개발/리로드 팁
-Blender 내부에서 모듈을 빠르게 리로드하려면 Python 콘솔 또는 텍스트 에디터에서 다음을 실행합니다:
+**버전**
+- 0.1.0
 
-```
-import importlib, sys
-m = sys.modules.get("clipstudio")
-if m: importlib.reload(m)
-else:
-    import clipstudio
-    importlib.reload(clipstudio)
-```
-
-## 다음 단계 제안
-- 실제 Clip Studio 연동 시나리오 정의 (예: 이미지/PSD 내보내기, 레퍼런스 이미지 동기화 등)
-- 파일/프로세스 실행 경로 유효성 검사 및 OS별 처리
-- 작업 단축키, 상태표시, 오류 처리 추가
-- 테스트 가능한 유닛으로 로직 분리 (UI, IO, 변환 등)
-- Render Result 대신 뷰포트 캡처/멀티패스/컴포지터 결과 선택 옵션
-- PSD 계층 구조 내보내기는 외부 라이브러리 필요 여부 검토
-
-## 호환성
-- 최소 지원: Blender 4.5 LTS 이상
-- 현재 구현은 Windows 우선이며, macOS/Linux는 확장 가능 구조로 유지했습니다.
-
-## 라이선스
-- 명시되지 않은 경우 내부 사용 가정. 필요 시 LICENSE 추가 바랍니다.
+**라이선스**
+- 미명시 시 내부 사용 가정. 필요 시 `LICENSE` 추가 바랍니다.
