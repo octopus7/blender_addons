@@ -411,6 +411,14 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
     prev_pix_aspx = scene.render.pixel_aspect_x
     prev_pix_aspy = scene.render.pixel_aspect_y
     prev_cam = scene.camera
+    
+    # Prepare shading overrides for flat/unlit capture
+    space = vctx.get('space_data') if vctx else None
+    prev_space_shading = {}
+    prev_overlay = {}
+    scene_display = getattr(scene, 'display', None)
+    scene_shading = getattr(scene_display, 'shading', None) if scene_display else None
+    prev_scene_shading = {}
 
     try:
         # Match render settings to viewport region
@@ -424,6 +432,71 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
         scene.render.pixel_aspect_y = CAPTURE_PIXEL_ASPECT_Y
         # Use the provided camera
         scene.camera = cam
+        # Force Workbench Solid + Flat lighting with textures, overlays off
+        try:
+            if space and hasattr(space, 'shading'):
+                sh = space.shading
+                prev_space_shading = {
+                    'type': getattr(sh, 'type', None),
+                    'light': getattr(sh, 'light', None),
+                    'color_type': getattr(sh, 'color_type', None),
+                    'use_scene_lights': getattr(sh, 'use_scene_lights', None),
+                    'use_scene_world': getattr(sh, 'use_scene_world', None),
+                    'show_shadows': getattr(sh, 'show_shadows', None),
+                    'show_cavity': getattr(sh, 'show_cavity', None),
+                    'show_object_outline': getattr(sh, 'show_object_outline', None),
+                }
+                if hasattr(sh, 'type'):
+                    sh.type = 'SOLID'
+                if hasattr(sh, 'light'):
+                    sh.light = 'FLAT'
+                if hasattr(sh, 'color_type'):
+                    sh.color_type = 'TEXTURE'
+                if hasattr(sh, 'use_scene_lights'):
+                    sh.use_scene_lights = False
+                if hasattr(sh, 'use_scene_world'):
+                    sh.use_scene_world = False
+                if hasattr(sh, 'show_shadows'):
+                    sh.show_shadows = False
+                if hasattr(sh, 'show_cavity'):
+                    sh.show_cavity = False
+                if hasattr(sh, 'show_object_outline'):
+                    sh.show_object_outline = False
+            if space and hasattr(space, 'overlay') and space.overlay:
+                ov = space.overlay
+                prev_overlay = {'show_overlays': getattr(ov, 'show_overlays', None)}
+                if hasattr(ov, 'show_overlays'):
+                    ov.show_overlays = False
+        except Exception:
+            pass
+        # Also set scene display shading for non-view-context OpenGL render path
+        try:
+            if scene_shading:
+                prev_scene_shading = {
+                    'light': getattr(scene_shading, 'light', None),
+                    'color_type': getattr(scene_shading, 'color_type', None),
+                    'use_scene_lights': getattr(scene_shading, 'use_scene_lights', None),
+                    'use_scene_world': getattr(scene_shading, 'use_scene_world', None),
+                    'show_shadows': getattr(scene_shading, 'show_shadows', None),
+                    'show_cavity': getattr(scene_shading, 'show_cavity', None),
+                    'show_object_outline': getattr(scene_shading, 'show_object_outline', None),
+                }
+                if hasattr(scene_shading, 'light'):
+                    scene_shading.light = 'FLAT'
+                if hasattr(scene_shading, 'color_type'):
+                    scene_shading.color_type = 'TEXTURE'
+                if hasattr(scene_shading, 'use_scene_lights'):
+                    scene_shading.use_scene_lights = False
+                if hasattr(scene_shading, 'use_scene_world'):
+                    scene_shading.use_scene_world = False
+                if hasattr(scene_shading, 'show_shadows'):
+                    scene_shading.show_shadows = False
+                if hasattr(scene_shading, 'show_cavity'):
+                    scene_shading.show_cavity = False
+                if hasattr(scene_shading, 'show_object_outline'):
+                    scene_shading.show_object_outline = False
+        except Exception:
+            pass
         # Debug
         _print_camera_debug("Capture", cam, scene, {
             'fmt': fmt_code,
@@ -443,6 +516,51 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
         scene.render.pixel_aspect_y = prev_pix_aspy
         img_settings.file_format = prev_fmt
         scene.camera = prev_cam
+        # Restore viewport shading/overlays
+        try:
+            if space and hasattr(space, 'shading') and prev_space_shading:
+                sh = space.shading
+                if 'type' in prev_space_shading and prev_space_shading['type'] is not None and hasattr(sh, 'type'):
+                    sh.type = prev_space_shading['type']
+                if 'light' in prev_space_shading and prev_space_shading['light'] is not None and hasattr(sh, 'light'):
+                    sh.light = prev_space_shading['light']
+                if 'color_type' in prev_space_shading and prev_space_shading['color_type'] is not None and hasattr(sh, 'color_type'):
+                    sh.color_type = prev_space_shading['color_type']
+                if 'use_scene_lights' in prev_space_shading and prev_space_shading['use_scene_lights'] is not None and hasattr(sh, 'use_scene_lights'):
+                    sh.use_scene_lights = prev_space_shading['use_scene_lights']
+                if 'use_scene_world' in prev_space_shading and prev_space_shading['use_scene_world'] is not None and hasattr(sh, 'use_scene_world'):
+                    sh.use_scene_world = prev_space_shading['use_scene_world']
+                if 'show_shadows' in prev_space_shading and prev_space_shading['show_shadows'] is not None and hasattr(sh, 'show_shadows'):
+                    sh.show_shadows = prev_space_shading['show_shadows']
+                if 'show_cavity' in prev_space_shading and prev_space_shading['show_cavity'] is not None and hasattr(sh, 'show_cavity'):
+                    sh.show_cavity = prev_space_shading['show_cavity']
+                if 'show_object_outline' in prev_space_shading and prev_space_shading['show_object_outline'] is not None and hasattr(sh, 'show_object_outline'):
+                    sh.show_object_outline = prev_space_shading['show_object_outline']
+            if space and hasattr(space, 'overlay') and prev_overlay:
+                ov = space.overlay
+                if 'show_overlays' in prev_overlay and prev_overlay['show_overlays'] is not None and hasattr(ov, 'show_overlays'):
+                    ov.show_overlays = prev_overlay['show_overlays']
+        except Exception:
+            pass
+        # Restore scene display shading
+        try:
+            if scene_shading and prev_scene_shading:
+                if 'light' in prev_scene_shading and prev_scene_shading['light'] is not None and hasattr(scene_shading, 'light'):
+                    scene_shading.light = prev_scene_shading['light']
+                if 'color_type' in prev_scene_shading and prev_scene_shading['color_type'] is not None and hasattr(scene_shading, 'color_type'):
+                    scene_shading.color_type = prev_scene_shading['color_type']
+                if 'use_scene_lights' in prev_scene_shading and prev_scene_shading['use_scene_lights'] is not None and hasattr(scene_shading, 'use_scene_lights'):
+                    scene_shading.use_scene_lights = prev_scene_shading['use_scene_lights']
+                if 'use_scene_world' in prev_scene_shading and prev_scene_shading['use_scene_world'] is not None and hasattr(scene_shading, 'use_scene_world'):
+                    scene_shading.use_scene_world = prev_scene_shading['use_scene_world']
+                if 'show_shadows' in prev_scene_shading and prev_scene_shading['show_shadows'] is not None and hasattr(scene_shading, 'show_shadows'):
+                    scene_shading.show_shadows = prev_scene_shading['show_shadows']
+                if 'show_cavity' in prev_scene_shading and prev_scene_shading['show_cavity'] is not None and hasattr(scene_shading, 'show_cavity'):
+                    scene_shading.show_cavity = prev_scene_shading['show_cavity']
+                if 'show_object_outline' in prev_scene_shading and prev_scene_shading['show_object_outline'] is not None and hasattr(scene_shading, 'show_object_outline'):
+                    scene_shading.show_object_outline = prev_scene_shading['show_object_outline']
+        except Exception:
+            pass
 
     # Guess saved path
     ext = 'png' if fmt_code == 'PNG' else ('tif' if fmt_code == 'TIFF' else fmt_code.lower())
