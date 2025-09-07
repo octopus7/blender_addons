@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Clip Studio Bridge",
-    "author": "blendue",
+    "author": "BlenG",
     "version": (0, 1, 0),
     "blender": (4, 5, 0),
     "location": "3D Viewport > Sidebar > ClipStudio",
