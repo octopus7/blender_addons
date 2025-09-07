@@ -448,6 +448,9 @@ def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> st
     img_settings = scene.render.image_settings
     prev_fmt = img_settings.file_format
     prev_path = scene.render.filepath
+    # Color management (view/display) snapshot
+    prev_view = {}
+    prev_display = {}
     # 확장자 맵핑
     want_ext = 'png' if fmt_code == 'PNG' else 'tif'
 
@@ -459,12 +462,54 @@ def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> st
     try:
         img_settings.file_format = fmt_code
         scene.render.filepath = filepath_no_ext
+        # Force Color Management to Standard for 1:1 texture color capture
+        try:
+            vs = scene.view_settings
+            ds = scene.display_settings
+            prev_view = {
+                'view_transform': getattr(vs, 'view_transform', None),
+                'look': getattr(vs, 'look', None),
+                'exposure': getattr(vs, 'exposure', None),
+                'gamma': getattr(vs, 'gamma', None),
+            }
+            prev_display = {
+                'display_device': getattr(ds, 'display_device', None),
+            }
+            if hasattr(vs, 'view_transform'):
+                vs.view_transform = 'Standard'
+            if hasattr(vs, 'look'):
+                vs.look = 'None'
+            if hasattr(vs, 'exposure'):
+                vs.exposure = 0.0
+            if hasattr(vs, 'gamma'):
+                vs.gamma = 1.0
+            if hasattr(ds, 'display_device'):
+                ds.display_device = 'sRGB'
+        except Exception:
+            pass
         # viewport 기준 OpenGL 렌더를 파일로 저장
         with bpy.context.temp_override(**ovr):
             bpy.ops.render.opengl(view_context=True, write_still=True)
     finally:
         scene.render.filepath = prev_path
         img_settings.file_format = prev_fmt
+        # Restore color management
+        try:
+            vs = scene.view_settings
+            ds = scene.display_settings
+            if prev_view:
+                if 'view_transform' in prev_view and prev_view['view_transform'] is not None and hasattr(vs, 'view_transform'):
+                    vs.view_transform = prev_view['view_transform']
+                if 'look' in prev_view and prev_view['look'] is not None and hasattr(vs, 'look'):
+                    vs.look = prev_view['look']
+                if 'exposure' in prev_view and prev_view['exposure'] is not None and hasattr(vs, 'exposure'):
+                    vs.exposure = prev_view['exposure']
+                if 'gamma' in prev_view and prev_view['gamma'] is not None and hasattr(vs, 'gamma'):
+                    vs.gamma = prev_view['gamma']
+            if prev_display and 'display_device' in prev_display and prev_display['display_device'] is not None and hasattr(ds, 'display_device'):
+                ds.display_device = prev_display['display_device']
+        except Exception:
+            pass
 
     # Blender가 붙여 저장한 최종 경로 추정
     cand1 = filepath_no_ext + "." + want_ext
@@ -488,6 +533,9 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
     prev_pix_aspx = scene.render.pixel_aspect_x
     prev_pix_aspy = scene.render.pixel_aspect_y
     prev_cam = scene.camera
+    # Color management (view/display) snapshot
+    prev_view = {}
+    prev_display = {}
     
     # Prepare shading overrides for flat/unlit capture
     space = vctx.get('space_data') if vctx else None
@@ -509,6 +557,31 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
         scene.render.pixel_aspect_y = CAPTURE_PIXEL_ASPECT_Y
         # Use the provided camera
         scene.camera = cam
+        # Force Color Management to Standard for 1:1 texture color capture
+        try:
+            vs = scene.view_settings
+            ds = scene.display_settings
+            prev_view = {
+                'view_transform': getattr(vs, 'view_transform', None),
+                'look': getattr(vs, 'look', None),
+                'exposure': getattr(vs, 'exposure', None),
+                'gamma': getattr(vs, 'gamma', None),
+            }
+            prev_display = {
+                'display_device': getattr(ds, 'display_device', None),
+            }
+            if hasattr(vs, 'view_transform'):
+                vs.view_transform = 'Standard'
+            if hasattr(vs, 'look'):
+                vs.look = 'None'
+            if hasattr(vs, 'exposure'):
+                vs.exposure = 0.0
+            if hasattr(vs, 'gamma'):
+                vs.gamma = 1.0
+            if hasattr(ds, 'display_device'):
+                ds.display_device = 'sRGB'
+        except Exception:
+            pass
         # Force Workbench Solid + Flat lighting with textures, overlays off
         try:
             if space and hasattr(space, 'shading'):
@@ -593,6 +666,23 @@ def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt
         scene.render.pixel_aspect_y = prev_pix_aspy
         img_settings.file_format = prev_fmt
         scene.camera = prev_cam
+        # Restore color management
+        try:
+            vs = scene.view_settings
+            ds = scene.display_settings
+            if prev_view:
+                if 'view_transform' in prev_view and prev_view['view_transform'] is not None and hasattr(vs, 'view_transform'):
+                    vs.view_transform = prev_view['view_transform']
+                if 'look' in prev_view and prev_view['look'] is not None and hasattr(vs, 'look'):
+                    vs.look = prev_view['look']
+                if 'exposure' in prev_view and prev_view['exposure'] is not None and hasattr(vs, 'exposure'):
+                    vs.exposure = prev_view['exposure']
+                if 'gamma' in prev_view and prev_view['gamma'] is not None and hasattr(vs, 'gamma'):
+                    vs.gamma = prev_view['gamma']
+            if prev_display and 'display_device' in prev_display and prev_display['display_device'] is not None and hasattr(ds, 'display_device'):
+                ds.display_device = prev_display['display_device']
+        except Exception:
+            pass
         # Restore viewport shading/overlays
         try:
             if space and hasattr(space, 'shading') and prev_space_shading:
@@ -772,23 +862,37 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
     def invoke(self, context, event):
         names = [obj.name for obj in bpy.data.objects if obj.type == 'CAMERA' and obj.name.startswith('CSP_QE_')]
         if names:
-            self.found_names = "\n".join(sorted(names))
+            try:
+                self.found_names = "\n".join(sorted(names))
+            except Exception:
+                # Graceful if property isn't registered in a stale install
+                pass
             return context.window_manager.invoke_props_dialog(self, width=420)
         return self.execute(context)
 
     def draw(self, context):
         layout = self.layout
-        if self.found_names:
+        fn = ""
+        try:
+            fn = self.found_names
+        except Exception:
+            fn = ""
+        if fn:
             layout.label(text=_t('Found existing CSP_QE cameras:'))
-            for nm in self.found_names.split("\n"):
+            for nm in fn.split("\n"):
                 layout.label(text=f"- {nm}")
             layout.separator()
             layout.prop(self, "cleanup_choice", expand=True, text=_t('Existing CSP_QE cameras'))
 
     def execute(self, context):
         # Handle cleanup choice
-        if self.found_names:
-            names = [n for n in self.found_names.split("\n") if n.strip()]
+        fn = ""
+        try:
+            fn = self.found_names
+        except Exception:
+            fn = ""
+        if fn:
+            names = [n for n in fn.split("\n") if n.strip()]
             if self.cleanup_choice == 'CANCEL':
                 self.report({'INFO'}, _t('Start cancelled by user'))
                 return {'CANCELLED'}
@@ -846,6 +950,13 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
         # 캡처 이미지를 블렌더에 로드
         try:
             proj_img = bpy.data.images.load(proj_path, check_existing=True)
+            # Ensure capture image is treated as sRGB (display) in Blender
+            try:
+                cs = getattr(proj_img, 'colorspace_settings', None)
+                if cs and hasattr(cs, 'name'):
+                    cs.name = 'sRGB'
+            except Exception:
+                pass
         except Exception as e:
             self.report({'ERROR'}, _tf('Failed to load capture image: {error}', error=e))
             return {'CANCELLED'}
@@ -1016,6 +1127,13 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
             src_img = bpy.data.images.get(proj_name) or bpy.data.images.load(src_path, check_existing=True)
             try:
                 src_img.reload()
+            except Exception:
+                pass
+            # Ensure source image is treated as sRGB for correct emission baking
+            try:
+                cs = getattr(src_img, 'colorspace_settings', None)
+                if cs and hasattr(cs, 'name'):
+                    cs.name = 'sRGB'
             except Exception:
                 pass
         except Exception as e:
