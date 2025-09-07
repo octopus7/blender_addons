@@ -57,10 +57,17 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
         default=CSP_DEFAULT_PATH,
     )
 
+    show_path_controls_in_viewport: BoolProperty(
+        name="뷰포트에 경로/찾기 표시",
+        description="뷰포트 패널에서 CSP 경로와 자동검색 버튼을 표시합니다",
+        default=True,
+    )
+
     def draw(self, context):
         layout = self.layout
         col = layout.column()
         col.prop(self, "csp_path")
+        col.prop(self, "show_path_controls_in_viewport")
         col.operator("clipstudio.detect_path", icon='VIEWZOOM')
 
 
@@ -519,8 +526,8 @@ class VIEW3D_PT_clipstudio(Panel):
         box = layout.box()
         row = box.row()
         row.label(text="상태", icon='INFO')
-        box.label(text=f"CSP 경로: {prefs.csp_path if prefs and prefs.csp_path else '(미설정)'}")
-        if prefs:
+        if prefs and prefs.show_path_controls_in_viewport:
+            box.label(text=f"CSP 경로: {prefs.csp_path if prefs and prefs.csp_path else '(미설정)'}")
             box.operator("clipstudio.detect_path", icon='VIEWZOOM')
 
         layout.separator()
@@ -544,8 +551,9 @@ class VIEW3D_PT_csp_quickedit(Panel):
         box = layout.box()
         row = box.row()
         row.label(text="Clip Studio Paint", icon='BRUSH_DATA')
-        box.prop(prefs, "csp_path")
-        box.operator("clipstudio.detect_path", icon='VIEWZOOM')
+        if prefs and prefs.show_path_controls_in_viewport:
+            box.prop(prefs, "csp_path")
+            box.operator("clipstudio.detect_path", icon='VIEWZOOM')
 
         layout.separator()
         col = layout.column()

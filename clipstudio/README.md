@@ -29,6 +29,7 @@
 메모
 - 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
 - 렌더 저장 위치는 Blender 임시 폴더 하위 `clipstudio` 디렉터리이며, UI로 경로를 설정하지 않습니다.
+ - 뷰포트 패널의 CSP 경로/찾기 버튼 노출은 환경설정의 "뷰포트에 경로/찾기 표시"로 제어할 수 있습니다(기본: 표시).
 
 ### Quick Edit (CSP 전용)
 - 위치: 3D Viewport > Sidebar(N) > "CSP QuickEdit" 탭
