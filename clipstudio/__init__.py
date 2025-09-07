@@ -19,6 +19,55 @@ import subprocess
 import shutil
 from datetime import datetime
 from mathutils import Matrix
+try:
+    from . import i18n  # package import
+except Exception as _e:
+    print(f"[ClipStudio] i18n import failed: {_e}")
+    # Minimal fallback to prevent registration failure
+    class _I18NFallback:
+        SUPPORTED_LANGS = [
+            {"key": "EN", "code": "en"},
+            {"key": "KO", "code": "ko"},
+            {"key": "JA", "code": "ja"},
+        ]
+        def t(self, key, lang_code=None):
+            return key
+        def tf(self, key, lang_code=None, **kwargs):
+            try:
+                return key.format(**kwargs)
+            except Exception:
+                return key
+        def language_name_for_code(self, code, in_lang_code=None):
+            return {"en": "English", "ko": "Korean", "ja": "Japanese"}.get(code, "English")
+        def detect_os_lang_code(self):
+            return 'en'
+        def key_from_code(self, code):
+            return {"en": "EN", "ko": "KO", "ja": "JA"}.get((code or '').lower(), "EN")
+        def set_lang_getter(self, func):
+            pass
+        def lang_code_for_pref(self, pref_value):
+            return 'en'
+    i18n = _I18NFallback()
+
+# Aliases for translation helpers (UI only; logs remain English)
+_t = i18n.t
+_tf = i18n.tf
+
+# Build static Enum items from i18n.SUPPORTED_LANGS to avoid callback registration issues
+_UI_LANG_ITEMS = [('AUTO', _t('Auto (OS)'), _t('Auto (OS)'))]
+try:
+    for _it in getattr(i18n, 'SUPPORTED_LANGS', []):
+        _key = _it.get('key')
+        _code = _it.get('code')
+        if _key and _code:
+            _label = i18n.language_name_for_code(_code)
+            _UI_LANG_ITEMS.append((_key, _label, _label))
+except Exception:
+    _UI_LANG_ITEMS.extend([
+        ('EN', 'English', 'English'),
+        ('KO', '한국어', '한국어'),
+        ('JA', '日本語', '日本語'),
+    ])
 
 # --------------------
 # Defaults / Globals
@@ -50,165 +99,7 @@ CAPTURE_PIXEL_ASPECT_X = 1.0
 CAPTURE_PIXEL_ASPECT_Y = 1.0
 
 
-# --------------------
-# i18n (UI only)
-# --------------------
-
-# Supported UI languages: 'en', 'ko', 'ja'
-I18N = {
-    'UI Language': {
-        'en': 'UI Language',
-        'ko': 'UI 언어',
-        'ja': 'UI言語',
-    },
-    'Auto (OS)': {
-        'en': 'Auto (OS)',
-        'ko': '자동 (OS 기준)',
-        'ja': '自動 (OS)',
-    },
-    'English': {
-        'en': 'English',
-        'ko': '영어',
-        'ja': '英語',
-    },
-    'Korean': {
-        'en': 'Korean',
-        'ko': '한국어',
-        'ja': '韓国語',
-    },
-    'Japanese': {
-        'en': 'Japanese',
-        'ko': '일본어',
-        'ja': '日本語',
-    },
-    'Status': {
-        'en': 'Status',
-        'ko': '상태',
-        'ja': 'ステータス',
-    },
-    'Clip Studio Path': {
-        'en': 'Clip Studio Path',
-        'ko': '클립 스튜디오 경로',
-        'ja': 'CLIP STUDIO パス',
-    },
-    'Show Path Controls in Viewport': {
-        'en': 'Show Path Controls in Viewport',
-        'ko': '뷰포트에서 경로 설정 표시',
-        'ja': 'ビューポートでパス設定を表示',
-    },
-    'Detect Path': {
-        'en': 'Detect Path',
-        'ko': '경로 자동 감지',
-        'ja': 'パスを検出',
-    },
-    'Available': {
-        'en': 'Available',
-        'ko': '확인됨',
-        'ja': '利用可能',
-    },
-    'Path not set / Executable missing': {
-        'en': 'Path not set / Executable missing',
-        'ko': '경로 미지정 / 실행 파일 없음',
-        'ja': 'パス未設定 / 実行ファイルなし',
-    },
-    'Active Image': {
-        'en': 'Active Image',
-        'ko': '활성 이미지',
-        'ja': 'アクティブ画像',
-    },
-    'Path': {
-        'en': 'Path',
-        'ko': '경로',
-        'ja': 'パス',
-    },
-    'Start Quick Edit (CSP)': {
-        'en': 'Start Quick Edit (CSP)',
-        'ko': '퀵 에딧 시작 (CSP)',
-        'ja': 'クイック編集開始 (CSP)',
-    },
-    'Apply Projection (Active Obj)': {
-        'en': 'Apply Projection (Active Obj)',
-        'ko': '프로젝션 적용 (활성 오브젝트)',
-        'ja': '投影を適用（アクティブ）',
-    },
-    'Clean Temporary Files': {
-        'en': 'Clean Temporary Files',
-        'ko': '임시 파일 정리',
-        'ja': '一時ファイルを削除',
-    },
-    'Found existing CSP_QE cameras:': {
-        'en': 'Found existing CSP_QE cameras:',
-        'ko': '기존 CSP_QE 카메라를 찾았습니다:',
-        'ja': '既存のCSP_QEカメラが見つかりました:',
-    },
-    'Existing CSP_QE cameras': {
-        'en': 'Existing CSP_QE cameras',
-        'ko': '기존 CSP_QE 카메라',
-        'ja': '既存のCSP_QEカメラ',
-    },
-    'Console logs are always English.': {
-        'en': 'Console logs are always English.',
-        'ko': '콘솔 로그는 항상 영어입니다.',
-        'ja': 'コンソールログは常に英語です。',
-    },
-    'Detected OS language': {
-        'en': 'Detected OS language',
-        'ko': '감지된 OS 언어',
-        'ja': '検出されたOS言語',
-    },
-}
-
-
-def _detect_os_lang_code() -> str:
-    """Return 'ko', 'ja', or 'en' from OS locale."""
-    try:
-        import sys as _sys, os as _os, locale as _locale
-        if _sys.platform.startswith('win'):
-            try:
-                import ctypes
-                langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
-                msg = _locale.windows_locale.get(int(langid), '') or ''
-                msg = msg.lower()
-            except Exception:
-                msg = ''
-        else:
-            msg = ''
-            for var in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
-                val = _os.environ.get(var)
-                if val:
-                    msg = val
-                    break
-            msg = (msg or '').split('.')[0].split('@')[0].lower()
-        if msg.startswith('ko'):
-            return 'ko'
-        if msg.startswith('ja'):
-            return 'ja'
-        if msg.startswith('en'):
-            return 'en'
-    except Exception:
-        pass
-    return 'en'
-
-
-def _get_effective_ui_lang(prefs=None) -> str:
-    prefs = prefs or get_prefs()
-    code = 'en'
-    try:
-        if prefs and getattr(prefs, 'ui_language', 'AUTO') != 'AUTO':
-            code = {'EN': 'en', 'KO': 'ko', 'JA': 'ja'}.get(prefs.ui_language, 'en')
-        else:
-            code = _detect_os_lang_code()
-    except Exception:
-        code = 'en'
-    return code
-
-
-def _t(key: str) -> str:
-    try:
-        lang = _get_effective_ui_lang()
-        return I18N.get(key, {}).get(lang, I18N.get(key, {}).get('en', key))
-    except Exception:
-        return key
+# i18n helpers moved to i18n.py
 
 
 # --------------------
@@ -300,12 +191,7 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
     ui_language: EnumProperty(
         name="UI Language",
         description="Language for add-on UI (console logs remain English)",
-        items=(
-            ('AUTO', 'Auto (OS)', 'Detect from OS language'),
-            ('EN', 'English', 'English UI'),
-            ('KO', '한국어', 'Korean UI'),
-            ('JA', '日本語', 'Japanese UI'),
-        ),
+        items=_UI_LANG_ITEMS,
         default='AUTO',
     )
 
@@ -334,12 +220,12 @@ class CLIPSTUDIO_Preferences(AddonPreferences):
         col = layout.column()
         # Language selection (UI only)
         col.prop(self, "ui_language", text=_t('UI Language'))
+        det = i18n.detect_os_lang_code()
         try:
-            det = _detect_os_lang_code()
-            det_label = {'en': 'English', 'ko': 'Korean', 'ja': 'Japanese'}.get(det, 'English')
-            layout.label(text=f"{_t('Detected OS language')}: {det_label}")
+            det_label = i18n.language_name_for_code(det, in_lang_code=i18n.current_lang_code())
         except Exception:
-            pass
+            det_label = det
+        layout.label(text=f"{_t('Detected OS language')}: {det_label}")
         layout.label(text=_t('Console logs are always English.'))
         layout.separator()
         col.prop(self, "csp_path", text=_t('Clip Studio Path'))
@@ -847,15 +733,15 @@ class CLIPSTUDIO_OT_detect_path(Operator):
     def execute(self, context):
         prefs = get_prefs()
         if not prefs:
-            self.report({'ERROR'}, "Add-on preferences not found.")
+            self.report({'ERROR'}, _t('Add-on preferences not found.'))
             return {'CANCELLED'}
         found = detect_csp_path()
         if found:
             prefs.csp_path = found
-            self.report({'INFO'}, f"Path set: {found}")
+            self.report({'INFO'}, _tf('Path set: {path}', path=found))
             return {'FINISHED'}
         else:
-            self.report({'WARNING'}, "Installation not found. Please set manually.")
+            self.report({'WARNING'}, _t('Installation not found. Please set manually.'))
             return {'CANCELLED'}
 
 
@@ -872,10 +758,10 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
 
     cleanup_choice: EnumProperty(
     	name="Existing CSP_QE cameras",
-    	items=[
-    		('DELETE', "Delete", "Delete found cameras"),
-    		('KEEP', "Keep", "Keep found cameras"),
-    		('CANCEL', "Cancel", "Cancel Start")
+    	items=lambda self, ctx: [
+    		('DELETE', _t('Delete'), _t('Delete found cameras')),
+    		('KEEP', _t('Keep'), _t('Keep found cameras')),
+    		('CANCEL', _t('Cancel'), _t('Cancel Start'))
     	],
     	default='DELETE',
     )
@@ -903,7 +789,7 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
         if self.found_names:
             names = [n for n in self.found_names.split("\n") if n.strip()]
             if self.cleanup_choice == 'CANCEL':
-                self.report({'INFO'}, "Start cancelled by user")
+                self.report({'INFO'}, _t('Start cancelled by user'))
                 return {'CANCELLED'}
             elif self.cleanup_choice == 'DELETE':
                 for nm in names:
@@ -924,19 +810,19 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
                             pass
         prefs = get_prefs()
         if not prefs or not prefs.csp_path:
-            self.report({'ERROR'}, "CSP path is not set. Set it in Preferences.")
+            self.report({'ERROR'}, _t('CSP path is not set. Set it in Preferences.'))
             return {'CANCELLED'}
 
         dest_img = get_active_image(context)
         if not dest_img:
-            self.report({'ERROR'}, "No active texture image. Select one in Image Editor/Texture Paint/Active Image Texture node.")
+            self.report({'ERROR'}, _t('No active texture image. Select one in Image Editor/Texture Paint/Active Image Texture node.'))
             return {'CANCELLED'}
 
         # 3D 뷰 컨텍스트 확보 및 투영 카메라 준비
         vctx = _find_view3d_context(context)
         ovr = _override_from_view3d(vctx)
         if not ovr:
-            self.report({'ERROR'}, "3D Viewport not found.")
+            self.report({'ERROR'}, _t('3D Viewport not found.'))
             return {'CANCELLED'}
         _print_view_debug("Start:Before", vctx)
 
@@ -953,14 +839,14 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
             # Capture from saved camera using OpenGL (camera mode)
             proj_path = _camera_view_capture_to_file(context, vctx, cam, 'PNG', filepath_no_ext)
         except Exception as e:
-            self.report({'ERROR'}, f"Viewport capture failed: {e}")
+            self.report({'ERROR'}, _tf('Viewport capture failed: {error}', error=e))
             return {'CANCELLED'}
 
         # 캡처 이미지를 블렌더에 로드
         try:
             proj_img = bpy.data.images.load(proj_path, check_existing=True)
         except Exception as e:
-            self.report({'ERROR'}, f"Failed to load capture image: {e}")
+            self.report({'ERROR'}, _tf('Failed to load capture image: {error}', error=e))
             return {'CANCELLED'}
 
         # Get capture/image and viewport sizes
@@ -1010,10 +896,10 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
 
         ok = launch_csp(prefs.csp_path, proj_path)
         if not ok:
-            self.report({'ERROR'}, "Failed to launch CSP. Check the path.")
+            self.report({'ERROR'}, _t('Failed to launch CSP. Check the path.'))
             return {'CANCELLED'}
 
-        self.report({'INFO'}, f"Quick Edit started: opened capture in CSP, created camera {cam.name if cam else 'N/A'}")
+        self.report({'INFO'}, _tf('Quick Edit started: opened capture in CSP, created camera {name}', name=(cam.name if cam else 'N/A')))
         return {'FINISHED'}
 
 
@@ -1034,12 +920,12 @@ class CLIPSTUDIO_QUICKEDIT_OT_finish(Operator):
     def execute(self, context):
         img = get_active_image(context)
         if not img:
-            self.report({'ERROR'}, "No active image.")
+            self.report({'ERROR'}, _t('No active image.'))
             return {'CANCELLED'}
 
         sess = _session_for(img)
         if not sess:
-            self.report({'WARNING'}, "No active session to clean.")
+            self.report({'WARNING'}, _t('No active session to clean.'))
             return {'FINISHED'}
 
         proj_path = sess.get('proj_path')
@@ -1083,7 +969,7 @@ class CLIPSTUDIO_QUICKEDIT_OT_finish(Operator):
                     pass
 
         _del_session(img)
-        self.report({'INFO'}, "Quick Edit session cleaned")
+        self.report({'INFO'}, _t('Quick Edit session cleaned'))
         return {'FINISHED'}
 
 
@@ -1105,23 +991,23 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
     def execute(self, context):
         dest_img = get_active_image(context)
         if not dest_img:
-            self.report({'ERROR'}, "No active image.")
+            self.report({'ERROR'}, _t('No active image.'))
             return {'CANCELLED'}
 
         objs = _iter_target_objects(context, self.target)
         if not objs:
-            self.report({'ERROR'}, "No active mesh object.")
+            self.report({'ERROR'}, _t('No active mesh object.'))
             return {'CANCELLED'}
 
         sess = _session_for(dest_img)
         if not sess:
-            self.report({'ERROR'}, "No Quick Edit session. Run Start first.")
+            self.report({'ERROR'}, _t('No Quick Edit session. Run Start first.'))
             return {'CANCELLED'}
 
         proj_name = sess.get('proj_image_name')
         src_path = bpy.path.abspath(sess.get('proj_path') or "")
         if not (src_path and os.path.isfile(src_path)):
-            self.report({'ERROR'}, "Source capture not found. Edit/Save in CSP then retry.")
+            self.report({'ERROR'}, _t('Source capture not found. Edit/Save in CSP then retry.'))
             return {'CANCELLED'}
 
         # 소스 이미지를 별도 Image로 로드 (타깃과 동일 경로여도 check_existing으로 참조)
@@ -1132,14 +1018,14 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
             except Exception:
                 pass
         except Exception as e:
-            self.report({'ERROR'}, f"Failed to load source image: {e}")
+            self.report({'ERROR'}, _tf('Failed to load source image: {error}', error=e))
             return {'CANCELLED'}
 
         # 3D Viewport 컨텍스트 확보
         vctx = _find_view3d_context(context)
         ovr = _override_from_view3d(vctx)
         if not ovr:
-            self.report({'ERROR'}, "3D Viewport not found.")
+            self.report({'ERROR'}, _t('3D Viewport not found.'))
             return {'CANCELLED'}
         _print_view_debug("Apply:Before", vctx)
 
@@ -1360,10 +1246,10 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                 except Exception:
                     pass
 
-                self.report({'INFO'}, "Projection applied (Bake)")
+                self.report({'INFO'}, _t('Projection applied (Bake)'))
                 return {'FINISHED'}
             except Exception as e:
-                self.report({'ERROR'}, f"Projection failed: {e}")
+                self.report({'ERROR'}, _tf('Projection failed: {error}', error=e))
                 return {'CANCELLED'}
             finally:
                 # 카메라/머티리얼/렌더 엔진 원복 및 정리
@@ -1409,7 +1295,7 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                 except Exception:
                     pass
 
-        self.report({'INFO'}, "Projection applied (Active Object)")
+        self.report({'INFO'}, _t('Projection applied (Active Object)'))
         return {'FINISHED'}
 
 
@@ -1475,13 +1361,8 @@ def _maybe_init_language_pref():
         if not prefs:
             return
         if not getattr(prefs, 'did_auto_lang_init', False):
-            code = _detect_os_lang_code()
-            if code == 'ko':
-                prefs.ui_language = 'KO'
-            elif code == 'ja':
-                prefs.ui_language = 'JA'
-            else:
-                prefs.ui_language = 'EN'
+            code = i18n.detect_os_lang_code()
+            prefs.ui_language = i18n.key_from_code(code)
             prefs.did_auto_lang_init = True
             print(f"[ClipStudio] UI Language initialized to: {prefs.ui_language}")
     except Exception as e:
@@ -1494,6 +1375,11 @@ def register():
     print("[ClipStudio] Registered")
     # Initialize language preference on first install/use
     _maybe_init_language_pref()
+    # Provide current language getter to i18n
+    try:
+        i18n.set_lang_getter(lambda: i18n.lang_code_for_pref(getattr(get_prefs(), 'ui_language', 'AUTO')))
+    except Exception:
+        pass
 
 
 def unregister():
