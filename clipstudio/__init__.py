@@ -529,6 +529,14 @@ class VIEW3D_PT_clipstudio(Panel):
         if prefs and prefs.show_path_controls_in_viewport:
             box.label(text=f"CSP 경로: {prefs.csp_path if prefs and prefs.csp_path else '(미설정)'}")
             box.operator("clipstudio.detect_path", icon='VIEWZOOM')
+        else:
+            # 경로 UI 비표시 시, 실행 가능 상태만 간단히 표기
+            exe = bpy.path.abspath(prefs.csp_path) if (prefs and prefs.csp_path) else ""
+            ok = bool(exe and os.path.isfile(exe))
+            if ok:
+                box.label(text="사용 가능", icon='CHECKMARK')  # Blender의 체크 아이콘은 녹색 표현
+            else:
+                box.label(text="경로 미설정/실행 파일 없음", icon='ERROR')
 
         layout.separator()
         col = layout.column()
