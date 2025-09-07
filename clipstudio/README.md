@@ -26,8 +26,7 @@
 - 파일을 CSP로 열기: 파일 선택 대화상자에서 이미지/PSD/CLIP 파일을 선택해 바로 엽니다.
 
 메모
-- macOS에서 `.app` 번들을 경로로 지정하면 내부 실행 경로 없이 `open -a`로 실행합니다.
-- Linux는 네이티브 지원이 없으므로 Wine 설치 시 `.exe`와 함께 실행이 가능합니다.
+- 경로/폴더 해석은 Blender 유틸(`bpy.path.abspath`, `bpy.app.tempdir`)을 우선 사용합니다.
 
 ### Quick Edit (CSP 전용)
 - 위치: 3D Viewport > Sidebar(N) > "CSP QuickEdit" 탭
@@ -62,7 +61,7 @@ else:
 
 ## 호환성
 - 최소 지원: Blender 4.5 LTS 이상
-- 다른 버전에서도 동작할 수 있으나, API 변경에 따라 수정이 필요할 수 있습니다.
+- 현재 구현은 Windows 우선이며, macOS/Linux는 확장 가능 구조로 유지했습니다.
 
 ## 라이선스
 - 명시되지 않은 경우 내부 사용 가정. 필요 시 LICENSE 추가 바랍니다.

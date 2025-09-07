@@ -13,7 +13,6 @@ from bpy.types import AddonPreferences, Operator, Panel
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 import os
 import sys
-import platform
 import subprocess
 import shutil
 from datetime import datetime
@@ -23,7 +22,7 @@ from datetime import datetime
 # --------------------
 
 def _guess_csp_default() -> str:
-    # OS별 대표 설치 경로를 기본값으로 추정
+    # Windows 우선 기본값 (타 OS는 빈 값으로 확장 대기)
     if sys.platform.startswith('win'):
         for p in (
             r"C:\\Program Files\\CELSYS\\CLIP STUDIO\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
@@ -34,12 +33,7 @@ def _guess_csp_default() -> str:
                 return p
         # 최빈 경로를 기본값으로 설정 (없어도 기본값으로 노출)
         return r"C:\\Program Files\\CELSYS\\CLIP STUDIO\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe"
-    elif sys.platform == 'darwin':
-        # .app 번들을 기본값으로 둠
-        cand = "/Applications/Clip Studio Paint.app"
-        return cand
-    else:
-        return ""
+    return ""
 
 CSP_DEFAULT_PATH = _guess_csp_default()
 
@@ -113,39 +107,18 @@ def _is_linux():
 
 
 def detect_csp_path() -> str:
-    # Best-effort 경로 자동검색
+    # Windows 우선: 대표 설치 경로만 검색 (확장 용이하게 유지)
     if _is_windows():
         candidates = [
-            r"C:\\Program Files\\CELSYS\\CLIP STUDIO 1.5\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
             r"C:\\Program Files\\CELSYS\\CLIP STUDIO\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
+            r"C:\\Program Files\\CELSYS\\CLIP STUDIO 1.5\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
             r"C:\\Program Files (x86)\\CELSYS\\CLIP STUDIO 1.5\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
             r"C:\\Program Files\\CELSYS\\CLIP STUDIO PAINT\\CLIPStudioPaint.exe",
         ]
         for p in candidates:
             if os.path.isfile(p):
                 return p
-    elif _is_mac():
-        candidates = [
-            "/Applications/CLIP STUDIO 1.5/CLIP STUDIO PAINT.app",
-            "/Applications/Clip Studio Paint.app",
-            "/Applications/CLIP STUDIO PAINT.app",
-        ]
-        for p in candidates:
-            if os.path.exists(p):
-                return p
-        try:
-            apps_dir = "/Applications"
-            for entry in os.listdir(apps_dir):
-                nm = entry.lower()
-                if nm.endswith('.app') and 'clip' in nm and 'paint' in nm:
-                    path = os.path.join(apps_dir, entry)
-                    if os.path.exists(path):
-                        return path
-        except Exception:
-            pass
-    else:
-        # Linux: 기본적으로 비워둠 (Wine/Custom 설치 필요)
-        pass
+    # 그 외 OS는 현재 자동검색 미지원
     return ""
 
 
@@ -158,46 +131,19 @@ def launch_csp(csp_path: str, file_to_open: str | None = None) -> bool:
     if not csp_path:
         return False
     try:
-        if _is_mac():
-            if csp_path.endswith('.app'):
-                cmd = ['open', '-a', csp_path]
-                if file_to_open:
-                    cmd.append(file_to_open)
-                subprocess.Popen(cmd)
-                return True
-            else:
-                cmd = [csp_path]
-                if file_to_open:
-                    cmd.append(file_to_open)
-                subprocess.Popen(cmd)
-                return True
-        elif _is_windows():
-            cmd = [csp_path]
-            if file_to_open:
-                cmd.append(file_to_open)
-            subprocess.Popen(cmd)
-            return True
-        else:  # Linux
-            if csp_path.lower().endswith('.exe'):
-                wine = shutil.which('wine')
-                if wine:
-                    cmd = [wine, csp_path]
-                    if file_to_open:
-                        cmd.append(file_to_open)
-                    subprocess.Popen(cmd)
-                    return True
-            cmd = [csp_path]
-            if file_to_open:
-                cmd.append(file_to_open)
-            subprocess.Popen(cmd)
-            return True
+        exe = bpy.path.abspath(csp_path)
+        args = [exe]
+        if file_to_open:
+            args.append(bpy.path.abspath(file_to_open))
+        subprocess.Popen(args)
+        return True
     except Exception as e:
         print(f"[ClipStudio] Failed to launch: {e}")
         return False
 
 
 def _default_export_dir(prefs: CLIPSTUDIO_Preferences | None) -> str:
-    base = prefs.export_dir if (prefs and prefs.export_dir) else bpy.app.tempdir
+    base = bpy.path.abspath(prefs.export_dir) if (prefs and prefs.export_dir) else bpy.app.tempdir
     if not base:
         base = os.path.expanduser("~")
     path = os.path.join(base, "clipstudio")
