@@ -12,11 +12,13 @@ import bpy
 from bpy.types import AddonPreferences, Operator, Panel
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from mathutils import Matrix
+import math
 import os
 import sys
 import subprocess
 import shutil
 from datetime import datetime
+from mathutils import Matrix
 
 # --------------------
 # Defaults / Globals
@@ -40,6 +42,89 @@ CSP_DEFAULT_PATH = _guess_csp_default()
 
 # Quick Edit 세션 관리 (이미지명 -> 정보)
 _quick_sessions = {}
+
+# 캡쳐/투영 기본값 (요청사항: 1:1, 2048x2048, 임시카메라 기준)
+CAPTURE_RES_X = 2048
+CAPTURE_RES_Y = 2048
+CAPTURE_PIXEL_ASPECT_X = 1.0
+CAPTURE_PIXEL_ASPECT_Y = 1.0
+
+
+# --------------------
+# Debug helpers
+# --------------------
+
+def _safe_get(obj, attr, default=None):
+    try:
+        return getattr(obj, attr, default)
+    except Exception:
+        return default
+
+
+def _print_camera_debug(tag: str, cam: bpy.types.Object | None, scene: bpy.types.Scene | None, extra: dict | None = None):
+    try:
+        if not cam or not cam.data:
+            print(f"[ClipStudio][Debug][{tag}] Camera: None")
+            return
+        cd = cam.data
+        ang = _safe_get(cd, 'angle', None)
+        ang_x = _safe_get(cd, 'angle_x', None)
+        ang_y = _safe_get(cd, 'angle_y', None)
+        print(
+            f"[ClipStudio][Debug][{tag}] cam='{cam.name}', lens={_safe_get(cd,'lens',None)}, sensor_fit={_safe_get(cd,'sensor_fit',None)}, "
+            f"sensor=({_safe_get(cd,'sensor_width',None)}x{_safe_get(cd,'sensor_height',None)}), shift=({_safe_get(cd,'shift_x',None)},{_safe_get(cd,'shift_y',None)}), "
+            f"clip=({_safe_get(cd,'clip_start',None)}->{_safe_get(cd,'clip_end',None)}), angle={ang}, angle_x={ang_x}, angle_y={ang_y}"
+        )
+        try:
+            if ang_x and ang_y:
+                ax = math.tan(ang_x * 0.5)
+                ay = math.tan(ang_y * 0.5)
+                calc_aspect = ax / ay if ay != 0 else None
+                print(f"[ClipStudio][Debug][{tag}] fov_aspect_from_angles={calc_aspect}")
+        except Exception:
+            pass
+        if scene:
+            r = scene.render
+            print(
+                f"[ClipStudio][Debug][{tag}] render_res=({r.resolution_x}x{r.resolution_y})@{r.resolution_percentage}%, pixel_aspect=({r.pixel_aspect_x},{r.pixel_aspect_y}), "
+                f"use_border={_safe_get(r,'use_border',False)}, border=({_safe_get(r,'border_min_x',0)},{_safe_get(r,'border_min_y',0)})-({_safe_get(r,'border_max_x',1)},{_safe_get(r,'border_max_y',1)})"
+            )
+        if extra:
+            try:
+                print(f"[ClipStudio][Debug][{tag}] extra={extra}")
+            except Exception:
+                pass
+        try:
+            mw = cam.matrix_world
+            flat = [round(mw[i][j], 6) for i in range(4) for j in range(4)]
+            print(f"[ClipStudio][Debug][{tag}] cam_mw={flat}")
+        except Exception:
+            pass
+        try:
+            vf = cd.view_frame(scene=scene)
+            # view_frame returns 4 corners; print their lengths for quick sanity
+            lens = [round(v.length, 6) for v in vf]
+            print(f"[ClipStudio][Debug][{tag}] view_frame_lengths={lens}")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _print_view_debug(tag: str, vctx: dict | None):
+    try:
+        if not vctx:
+            print(f"[ClipStudio][Debug][{tag}] vctx=None")
+            return
+        reg = vctx.get('region')
+        sp = vctx.get('space_data')
+        r3d = vctx.get('region_3d')
+        print(
+            f"[ClipStudio][Debug][{tag}] region=({_safe_get(reg,'width',None)}x{_safe_get(reg,'height',None)}), "
+            f"view_persp={_safe_get(r3d,'view_perspective',None)}, cam_zoom={_safe_get(r3d,'view_camera_zoom',None)}, cam_offset={_safe_get(r3d,'view_camera_offset',None)}, lens={_safe_get(sp,'lens',None)}"
+        )
+    except Exception:
+        pass
 
 
 def get_prefs():
@@ -136,6 +221,23 @@ def _default_export_dir(prefs: CLIPSTUDIO_Preferences | None) -> str:
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _matrix_to_list(mat: Matrix) -> list:
+    try:
+        return [mat[i][j] for i in range(4) for j in range(4)]
+    except Exception:
+        return []
+
+
+def _list_to_matrix(vals: list) -> Matrix | None:
+    try:
+        if not vals or len(vals) != 16:
+            return None
+        rows = [vals[0:4], vals[4:8], vals[8:12], vals[12:16]]
+        return Matrix(rows)
+    except Exception:
+        return None
 
 
 def _sanitize_filename(name: str) -> str:
@@ -298,6 +400,56 @@ def _viewport_render_to_file(context, fmt_code: str, filepath_no_ext: str) -> st
     return cand1
 
 
+def _camera_view_capture_to_file(context, vctx: dict, cam: bpy.types.Object, fmt_code: str, filepath_no_ext: str) -> str:
+    scene = context.scene
+    img_settings = scene.render.image_settings
+    prev_fmt = img_settings.file_format
+    prev_path = scene.render.filepath
+    prev_resx = scene.render.resolution_x
+    prev_resy = scene.render.resolution_y
+    prev_resperc = scene.render.resolution_percentage
+    prev_pix_aspx = scene.render.pixel_aspect_x
+    prev_pix_aspy = scene.render.pixel_aspect_y
+    prev_cam = scene.camera
+
+    try:
+        # Match render settings to viewport region
+        img_settings.file_format = fmt_code
+        scene.render.filepath = filepath_no_ext
+        # 요청사항: 고정 1:1 정사각 해상도로 캡쳐
+        scene.render.resolution_x = CAPTURE_RES_X
+        scene.render.resolution_y = CAPTURE_RES_Y
+        scene.render.resolution_percentage = 100
+        scene.render.pixel_aspect_x = CAPTURE_PIXEL_ASPECT_X
+        scene.render.pixel_aspect_y = CAPTURE_PIXEL_ASPECT_Y
+        # Use the provided camera
+        scene.camera = cam
+        # Debug
+        _print_camera_debug("Capture", cam, scene, {
+            'fmt': fmt_code,
+            'filepath_no_ext': filepath_no_ext,
+            'res': f"{scene.render.resolution_x}x{scene.render.resolution_y}",
+            'px_aspect': f"{scene.render.pixel_aspect_x},{scene.render.pixel_aspect_y}",
+        })
+        # OpenGL render from camera
+        bpy.ops.render.opengl(view_context=False, write_still=True)
+    finally:
+        # Restore settings
+        scene.render.filepath = prev_path
+        scene.render.resolution_x = prev_resx
+        scene.render.resolution_y = prev_resy
+        scene.render.resolution_percentage = prev_resperc
+        scene.render.pixel_aspect_x = prev_pix_aspx
+        scene.render.pixel_aspect_y = prev_pix_aspy
+        img_settings.file_format = prev_fmt
+        scene.camera = prev_cam
+
+    # Guess saved path
+    ext = 'png' if fmt_code == 'PNG' else ('tif' if fmt_code == 'TIFF' else fmt_code.lower())
+    cand1 = filepath_no_ext + "." + ext
+    cand2 = filepath_no_ext + ".tiff"
+    return cand1 if os.path.isfile(cand1) else (cand2 if os.path.isfile(cand2) else cand1)
+
 def _create_tmp_camera_from_view(vctx, name: str = None):
     scene = bpy.context.scene
     cam_name = name or "CSP_QE_TMP_CAM"
@@ -306,28 +458,51 @@ def _create_tmp_camera_from_view(vctx, name: str = None):
     scene.collection.objects.link(cam)
     vl = bpy.context.view_layer
     prev_active = vl.objects.active
+    prev_scene_cam = scene.camera if scene else None
     try:
         vl.objects.active = cam
-        # Align camera to current view matrices directly
+        # Align camera to current viewport precisely via operator
+        r3d = vctx.get('region_3d') if vctx else None
+        space = vctx.get('space_data') if vctx else None
+        # Pre-configure lens/sensor to match the viewport
+        cam.data.type = 'PERSP'
         try:
-            r3d = vctx.get('region_3d') if vctx else None
-            space = vctx.get('space_data') if vctx else None
-            if r3d:
-                cam.matrix_world = r3d.view_matrix.inverted()
-            cam.data.type = 'PERSP'
             if space and hasattr(space, 'lens'):
                 cam.data.lens = space.lens
-            vp = getattr(r3d, 'view_perspective', None) if r3d else None
-            print(f"[ClipStudio] Created temp camera {cam.name}, view_persp={vp}, lens={getattr(space,'lens',None)}")
+        except Exception:
+            pass
+        # 요청사항: 정사각형(1:1) 센서로 고정 + 세로기준(VERTICAL)로 맞춤
+        try:
+            cam.data.sensor_fit = 'VERTICAL'
+            cam.data.sensor_width = 36.0
+            cam.data.sensor_height = 36.0
+        except Exception:
+            pass
+        # Set as scene camera before aligning
+        try:
+            scene.camera = cam
         except Exception:
             pass
         try:
-            scene.camera = cam
+            with bpy.context.temp_override(**_override_from_view3d(vctx)):
+                bpy.ops.view3d.camera_to_view()
+        except Exception as e:
+            print(f"[ClipStudio] camera_to_view failed: {e}")
+        vp = getattr(r3d, 'view_perspective', None) if r3d else None
+        try:
+            region = vctx.get('region') if vctx else None
+            print(f"[ClipStudio] Created temp camera {cam.name}, view_persp={vp}, lens={getattr(space,'lens',None)}, sensor=({cam.data.sensor_width},{cam.data.sensor_height}), capture=({CAPTURE_RES_X}x{CAPTURE_RES_Y}), region=({getattr(region,'width',None)}x{getattr(region,'height',None)})")
         except Exception:
             pass
     finally:
         if prev_active:
             vl.objects.active = prev_active
+        # Restore previous scene camera to avoid sticking camera after Start
+        try:
+            if prev_scene_cam is not None:
+                scene.camera = prev_scene_cam
+        except Exception:
+            pass
     return cam
 
 
@@ -455,8 +630,9 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
         if not ovr:
             self.report({'ERROR'}, "3D Viewport not found.")
             return {'CANCELLED'}
+        _print_view_debug("Start:Before", vctx)
 
-        # 뷰포트 캡처 및 현재 뷰 기준 임시 카메라 생성(Apply 때 사용 후 제거)
+        # Create a temp camera from current view (used for both capture and apply)
         cam = None
         prev_cam_name = bpy.context.scene.camera.name if (bpy.context.scene and bpy.context.scene.camera) else ""
         qdir = _ensure_quickedit_path(prefs)
@@ -464,9 +640,10 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
         basename = f"{name}_view_{_timestamp()}"
         filepath_no_ext = os.path.join(qdir, basename)
         try:
-            proj_path = _viewport_render_to_file(context, 'PNG', filepath_no_ext)
-            # 카메라 생성은 캡처 직후에 수행
+            # Create camera first to lock exact FOV/aspect
             cam = _create_tmp_camera_from_view(vctx, name=f"CSP_QE_CAM_{_timestamp()}")
+            # Capture from saved camera using OpenGL (camera mode)
+            proj_path = _camera_view_capture_to_file(context, vctx, cam, 'PNG', filepath_no_ext)
         except Exception as e:
             self.report({'ERROR'}, f"Viewport capture failed: {e}")
             return {'CANCELLED'}
@@ -478,7 +655,31 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
             self.report({'ERROR'}, f"Failed to load capture image: {e}")
             return {'CANCELLED'}
 
-        # 세션 저장 (키: 대상 텍스처 이미지명)
+        # Get capture/image and viewport sizes
+        cap_w = getattr(proj_img, 'size', [0, 0])[0] if hasattr(proj_img, 'size') else 0
+        cap_h = getattr(proj_img, 'size', [0, 0])[1] if hasattr(proj_img, 'size') else 0
+        region = vctx.get('region') if vctx else None
+        reg_w = getattr(region, 'width', 0) if region else 0
+        reg_h = getattr(region, 'height', 0) if region else 0
+        # Camera props snapshot
+        cam_data = cam.data if cam else None
+        cam_lens = getattr(cam_data, 'lens', 0.0) if cam_data else 0.0
+        # 센서핏은 세션 저장도 'VERTICAL'로 고정
+        cam_sensor_fit = 'VERTICAL'
+        cam_sensor_width = getattr(cam_data, 'sensor_width', 36.0) if cam_data else 36.0
+        cam_sensor_height = getattr(cam_data, 'sensor_height', 24.0) if cam_data else 24.0
+        cam_shift_x = getattr(cam_data, 'shift_x', 0.0) if cam_data else 0.0
+        cam_shift_y = getattr(cam_data, 'shift_y', 0.0) if cam_data else 0.0
+        cam_mw = _matrix_to_list(cam.matrix_world) if cam else []
+
+        # Debug dump
+        _print_camera_debug("Start:AfterCapture", cam, context.scene, {
+            'proj_path': proj_path,
+            'cap_size': f"{cap_w}x{cap_h}",
+            'region_size': f"{reg_w}x{reg_h}",
+        })
+
+        # Save session (keyed by target image)
         _set_session(dest_img, {
             'dest_image_name': dest_img.name,
             'proj_path': proj_path,
@@ -486,6 +687,17 @@ class CLIPSTUDIO_QUICKEDIT_OT_start(Operator):
             'started': _timestamp(),
             'cam_name': cam.name if cam else "",
             'prev_cam_name': prev_cam_name,
+            'cap_w': cap_w,
+            'cap_h': cap_h,
+            'reg_w': reg_w,
+            'reg_h': reg_h,
+            'cam_lens': cam_lens,
+            'cam_sensor_fit': cam_sensor_fit,
+            'cam_sensor_width': cam_sensor_width,
+            'cam_sensor_height': cam_sensor_height,
+            'cam_shift_x': cam_shift_x,
+            'cam_shift_y': cam_shift_y,
+            'cam_mw': cam_mw,
         })
 
         ok = launch_csp(prefs.csp_path, proj_path)
@@ -621,6 +833,7 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
         if not ovr:
             self.report({'ERROR'}, "3D Viewport not found.")
             return {'CANCELLED'}
+        _print_view_debug("Apply:Before", vctx)
 
         # 카메라 전환 없이 현재 뷰포트 시점 그대로 사용
 
@@ -651,8 +864,42 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                 cam = bpy.data.objects.get(cam_name) if cam_name else None
                 if cam is None:
                     raise RuntimeError("Saved camera not found. Run Start again.")
+                # Enforce saved camera transform and optics snapshot from Start
+                try:
+                    sv = sess
+                    mw = _list_to_matrix(sv.get('cam_mw')) if sv else None
+                    if mw is not None:
+                        cam.matrix_world = mw
+                    camd = cam.data
+                    camd.type = 'PERSP'
+                    # 요청사항: 세로 기준 고정
+                    camd.sensor_fit = 'VERTICAL'
+                    if sv:
+                        if 'cam_lens' in sv:
+                            camd.lens = float(sv['cam_lens'])
+                        if 'cam_sensor_width' in sv:
+                            camd.sensor_width = float(sv['cam_sensor_width'])
+                        if 'cam_sensor_height' in sv:
+                            camd.sensor_height = float(sv['cam_sensor_height'])
+                        if 'cam_shift_x' in sv:
+                            camd.shift_x = float(sv['cam_shift_x'])
+                        if 'cam_shift_y' in sv:
+                            camd.shift_y = float(sv['cam_shift_y'])
+                except Exception:
+                    pass
                 try:
                     scene.camera = cam
+                except Exception:
+                    pass
+
+                # Debug: Camera & session info
+                try:
+                    _print_camera_debug("Apply:CameraSetup", cam, scene, {
+                        'sess_reg': f"{sess.get('reg_w')}x{sess.get('reg_h')}",
+                        'sess_cap': f"{sess.get('cap_w')}x{sess.get('cap_h')}",
+                        'src_img': f"{getattr(src_img,'size',[0,0])[0]}x{getattr(src_img,'size',[0,0])[1]}",
+                        'dst_img': f"{getattr(dest_img,'size',[0,0])[0]}x{getattr(dest_img,'size',[0,0])[1]}",
+                    })
                 except Exception:
                     pass
 
@@ -685,11 +932,28 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                                 uv_mod.projectors[0] = cam
                             except Exception:
                                 pass
-                        # Aspect from source image
+                        # 투영 스케일: 1.0로 설정 (0.5는 절반 크기로 축소되는 문제가 있음)
                         try:
-                            if hasattr(src_img, 'size') and len(src_img.size) >= 2:
-                                uv_mod.aspect_x = src_img.size[0]
-                                uv_mod.aspect_y = src_img.size[1]
+                            uv_mod.scale_x = 1.0
+                            uv_mod.scale_y = 1.0
+                        except Exception:
+                            pass
+                        try:
+                            print(f"[ClipStudio][Debug][Apply:UVProject] initial aspect=({uv_mod.aspect_x},{uv_mod.aspect_y}), scale=({uv_mod.scale_x},{uv_mod.scale_y})")
+                        except Exception:
+                            pass
+                        # 요청사항: 캡쳐 해상도(정사각) 기준으로 UV Project 종횡비 설정
+                        try:
+                            cap_w = int(sess.get('cap_w') or CAPTURE_RES_X)
+                            cap_h = int(sess.get('cap_h') or CAPTURE_RES_Y)
+                            if cap_w <= 0: cap_w = CAPTURE_RES_X
+                            if cap_h <= 0: cap_h = CAPTURE_RES_Y
+                            uv_mod.aspect_x = float(cap_w)
+                            uv_mod.aspect_y = float(cap_h)
+                        except Exception:
+                            pass
+                        try:
+                            print(f"[ClipStudio][Debug][Apply:UVProject] set aspect=({uv_mod.aspect_x},{uv_mod.aspect_y}), scale=({uv_mod.scale_x},{uv_mod.scale_y})")
                         except Exception:
                             pass
                 except Exception:
@@ -729,13 +993,32 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                 target_ob.data.materials.clear()
                 target_ob.data.materials.append(tmp_mat)
 
-                # Cycles로 전환 후 Bake(EMIT)
+                # 요청사항: 베이크 중에도 캡쳐 해상도(정사각)로 고정
+                prev_resx = scene.render.resolution_x
+                prev_resy = scene.render.resolution_y
+                prev_resperc = scene.render.resolution_percentage
+                prev_pix_aspx = scene.render.pixel_aspect_x
+                prev_pix_aspy = scene.render.pixel_aspect_y
+                try:
+                    cap_w = int(sess.get('cap_w') or CAPTURE_RES_X)
+                    cap_h = int(sess.get('cap_h') or CAPTURE_RES_Y)
+                    if cap_w > 0 and cap_h > 0:
+                        scene.render.resolution_x = cap_w
+                        scene.render.resolution_y = cap_h
+                    scene.render.resolution_percentage = 100
+                    scene.render.pixel_aspect_x = CAPTURE_PIXEL_ASPECT_X
+                    scene.render.pixel_aspect_y = CAPTURE_PIXEL_ASPECT_Y
+                except Exception:
+                    pass
+
+                # Switch to Cycles and bake (EMIT)
                 scene.render.engine = 'CYCLES'
                 # 선택 상태 정리
                 for ob in bpy.context.view_layer.objects:
                     ob.select_set(False)
                 target_ob.select_set(True)
                 _set_active(target_ob)
+                print(f"[ClipStudio][Debug][Apply:Bake] res=({scene.render.resolution_x}x{scene.render.resolution_y}), pixel_aspect=({scene.render.pixel_aspect_x},{scene.render.pixel_aspect_y}), engine={scene.render.engine}")
                 bpy.ops.object.bake(type='EMIT', margin=2, use_clear=False)
 
                 # 베이크 결과는 이미지 데이터에 즉시 반영됨. reload는 메모리 변경을 덮어쓸 수 있으므로 호출하지 않음.
@@ -757,6 +1040,15 @@ class CLIPSTUDIO_QUICKEDIT_OT_apply_projection(Operator):
                     uv = me.uv_layers.get(tmp_uv_name) if hasattr(me, 'uv_layers') else None
                     if uv:
                         me.uv_layers.remove(uv)
+                except Exception:
+                    pass
+                # Restore render resolution settings
+                try:
+                    scene.render.resolution_x = prev_resx
+                    scene.render.resolution_y = prev_resy
+                    scene.render.resolution_percentage = prev_resperc
+                    scene.render.pixel_aspect_x = prev_pix_aspx
+                    scene.render.pixel_aspect_y = prev_pix_aspy
                 except Exception:
                     pass
 
