@@ -345,6 +345,15 @@ def language_name_for_code(code: str, in_lang_code: str | None = None) -> str:
     return t(name_key, lang_code=in_lang_code)
 
 
+def endonym_for_code(code: str) -> str:
+    """Return the language's self-name (endonym), not localized by UI language."""
+    return {
+        'en': 'English',
+        'ko': '한국어',
+        'ja': '日本語',
+    }.get((code or '').lower(), 'English')
+
+
 def enum_items(lang_code: str | None = None):
     code = lang_code or current_lang_code()
     items = [

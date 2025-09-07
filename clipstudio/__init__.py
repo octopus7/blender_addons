@@ -60,7 +60,8 @@ try:
         _key = _it.get('key')
         _code = _it.get('code')
         if _key and _code:
-            _label = i18n.language_name_for_code(_code)
+            # Show endonyms, independent from current UI/OS language
+            _label = getattr(i18n, 'endonym_for_code', lambda c: { 'en': 'English', 'ko': '한국어', 'ja': '日本語' }.get(c, 'English'))(_code)
             _UI_LANG_ITEMS.append((_key, _label, _label))
 except Exception:
     _UI_LANG_ITEMS.extend([
