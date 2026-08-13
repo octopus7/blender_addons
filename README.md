@@ -2,6 +2,8 @@
 
 [한국어](#한국어) · [English](#english) · [日本語](#日本語)
 
+[최신 릴리스 다운로드 · Download the latest release · 最新リリースをダウンロード](https://github.com/octopus7/blender_addons/releases/latest)
+
 ## 한국어
 
 Blender 애드온을 모아 관리하는 저장소입니다.
@@ -9,8 +11,6 @@ Blender 애드온을 모아 관리하는 저장소입니다.
 ### Shape Key Linker
 
 동일한 토폴로지의 외부 메시를 쉐이프 키에 연결하고, 나중에 원본 메시의 변경 사항을 다시 가져오는 Blender 4.5+ 애드온입니다. 연결 정보는 `.blend` 파일에 저장되므로 원본 메시를 다시 선택할 필요가 없습니다.
-
-[최신 릴리스 다운로드](https://github.com/octopus7/blender_addons/releases/latest)
 
 #### 사용법
 
@@ -71,8 +71,6 @@ This repository contains a collection of Blender add-ons.
 
 A Blender 4.5+ add-on that links external meshes with identical topology to shape keys and lets you pull in later changes from the source meshes. Links are stored in the `.blend` file, so the source meshes do not need to be selected again.
 
-[Download the latest release](https://github.com/octopus7/blender_addons/releases/latest)
-
 #### Usage
 
 1. Select one or more meshes to use as shape-key sources.
@@ -131,8 +129,6 @@ Blenderアドオンをまとめて管理するリポジトリです。
 ### Shape Key Linker
 
 同一トポロジーの外部メッシュをシェイプキーにリンクし、後からソースメッシュの変更を取り込めるBlender 4.5以降向けアドオンです。リンク情報は`.blend`ファイルに保存されるため、更新時にソースメッシュを選択し直す必要はありません。
-
-[最新リリースをダウンロード](https://github.com/octopus7/blender_addons/releases/latest)
 
 #### 使い方
 
