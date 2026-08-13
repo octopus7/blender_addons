@@ -1,0 +1,20 @@
+schema_version = "1.0.0"
+
+id = "shape_key_linker"
+version = "1.1.0"
+name = "Shape Key Linker"
+tagline = "Link external meshes to shape keys and update them anytime"
+maintainer = "blendue"
+type = "add-on"
+
+tags = ["Animation", "Modeling"]
+blender_version_min = "4.5.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  ".*",
+  "*.zip",
+  "tests/",
+]

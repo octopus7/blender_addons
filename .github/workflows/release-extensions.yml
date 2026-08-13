@@ -1,0 +1,117 @@
+name: Build Blender extensions
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional existing release tag to attach the ZIP files to
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blender-extensions-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  BLENDER_VERSION: "4.5.5"
+  BLENDER_ARCHIVE: blender-4.5.5-linux-x64.tar.xz
+  BLENDER_ROOT: ${{ github.workspace }}/.blender
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+jobs:
+  build:
+    name: Test, build, and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+
+      - name: Restore Blender
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: .blender
+          key: blender-${{ runner.os }}-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download and verify Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base_url="https://download.blender.org/release/Blender4.5"
+          curl --fail --location --retry 3 --remote-name "$base_url/$BLENDER_ARCHIVE"
+          curl --fail --location --retry 3 --remote-name "$base_url/blender-$BLENDER_VERSION.sha256"
+          grep "  $BLENDER_ARCHIVE$" "blender-$BLENDER_VERSION.sha256" | sha256sum --check -
+          mkdir -p "$BLENDER_ROOT"
+          tar -xJf "$BLENDER_ARCHIVE" --directory "$BLENDER_ROOT" --strip-components=1
+
+      - name: Run Blender integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$BLENDER_ROOT/blender" --background --factory-startup \
+            --python shape_key_linker/tests/test_shape_key_linker.py
+          "$BLENDER_ROOT/blender" --background --factory-startup \
+            shape_key_linker/tests/shape_key_linker_test.blend \
+            --python shape_key_linker/tests/test_reload.py
+          rm -f shape_key_linker/tests/shape_key_linker_test.blend \
+            shape_key_linker/tests/shape_key_linker_test.blend[0-9]*
+
+      - name: Build every extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          mapfile -d '' manifests < <(
+            find . -mindepth 2 -maxdepth 2 -name blender_manifest.toml \
+              -not -path './.blender/*' -print0
+          )
+          if (( ${#manifests[@]} == 0 )); then
+            echo "No blender_manifest.toml files found" >&2
+            exit 1
+          fi
+          for manifest in "${manifests[@]}"; do
+            source_dir="$(dirname "$manifest")"
+            "$BLENDER_ROOT/blender" --background --factory-startup \
+              --command extension build \
+              --source-dir "$source_dir" \
+              --output-dir "$GITHUB_WORKSPACE/dist"
+          done
+
+      - name: Validate packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(dist/*.zip)
+          if (( ${#packages[@]} == 0 )); then
+            echo "No extension packages were built" >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            "$BLENDER_ROOT/blender" --background --factory-startup \
+              --command extension validate "$package"
+          done
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-extensions-${{ github.event.release.tag_name || inputs.release_tag || github.run_number }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Attach packages to GitHub Release
+        if: env.RELEASE_TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" dist/*.zip --clobber
