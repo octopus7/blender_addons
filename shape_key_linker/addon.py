@@ -6,8 +6,100 @@ from array import array
 import textwrap
 
 import bpy
+from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, CollectionProperty, IntProperty, PointerProperty, StringProperty
 from bpy.types import Menu, Object, Operator, PropertyGroup
+
+
+_LIVE_DELAY = 0.1
+_LIVE_DIRTY: set[int] = set()
+_LIVE_UPDATING = False
+
+
+def _object_from_pointer(pointer):
+    for obj in bpy.data.objects:
+        if obj.as_pointer() == pointer:
+            return obj
+    return None
+
+
+def _queue_live_target(target):
+    if target is None or target.type != 'MESH':
+        return
+    _LIVE_DIRTY.add(target.as_pointer())
+    if not bpy.app.timers.is_registered(_run_live_updates):
+        bpy.app.timers.register(_run_live_updates, first_interval=_LIVE_DELAY)
+
+
+def _live_toggle_changed(target, _context):
+    if target.shape_key_linker_live:
+        _queue_live_target(target)
+    else:
+        _LIVE_DIRTY.discard(target.as_pointer())
+
+
+def _run_live_updates():
+    global _LIVE_UPDATING
+    if _LIVE_UPDATING:
+        return _LIVE_DELAY
+
+    pending = tuple(_LIVE_DIRTY)
+    _LIVE_DIRTY.clear()
+    retry = False
+    _LIVE_UPDATING = True
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for pointer in pending:
+            target = _object_from_pointer(pointer)
+            if target is None or not getattr(target, "shape_key_linker_live", False):
+                continue
+            if target.mode != 'OBJECT':
+                _LIVE_DIRTY.add(pointer)
+                retry = True
+                continue
+            for link in target.shape_key_linker_links:
+                if link.enabled:
+                    _update_link(target, link, depsgraph, create_missing=True)
+    finally:
+        _LIVE_UPDATING = False
+
+    return _LIVE_DELAY if retry or _LIVE_DIRTY else None
+
+
+@persistent
+def _live_depsgraph_update(_scene, depsgraph):
+    if _LIVE_UPDATING:
+        return
+
+    changed = set()
+    for update in depsgraph.updates:
+        datablock = update.id
+        if isinstance(datablock, (bpy.types.Object, bpy.types.Mesh)):
+            changed.add(datablock.as_pointer())
+            original = getattr(datablock, "original", None)
+            if original is not None:
+                changed.add(original.as_pointer())
+            if isinstance(datablock, bpy.types.Object) and datablock.type == 'MESH':
+                changed.add(datablock.data.as_pointer())
+                original_data = getattr(datablock.data, "original", None)
+                if original_data is not None:
+                    changed.add(original_data.as_pointer())
+    if not changed:
+        return
+
+    for target in bpy.data.objects:
+        if target.type != 'MESH' or not getattr(target, "shape_key_linker_live", False):
+            continue
+        for link in target.shape_key_linker_links:
+            source = link.source
+            if (
+                link.enabled
+                and source is not None
+                and source.type == 'MESH'
+                and (source.as_pointer() in changed or source.data.as_pointer() in changed)
+            ):
+                _queue_live_target(target)
+                break
 
 
 def _active_mesh(context):
@@ -170,7 +262,7 @@ class SKL_PG_link(PropertyGroup):
     target_key_count: IntProperty(default=0, options={'HIDDEN'})
     enabled: BoolProperty(
         name="Enabled",
-        description="Include this link when updating all linked shapes",
+        description="Include this link in Update All and Live Update",
         default=True,
     )
 
@@ -375,6 +467,9 @@ def _draw_linker_in_shape_keys(self, context):
     buttons = box.column(align=True)
     buttons.operator("object.shape_key_join_and_link", icon='ADD')
     buttons.operator("object.shape_key_update_linked", text="Update All", icon='FILE_REFRESH')
+    live = buttons.row()
+    live.enabled = len(target.shape_key_linker_links) > 0
+    live.prop(target, "shape_key_linker_live", text="Live Update", icon='LIGHT', toggle=True)
 
     if not target.shape_key_linker_links:
         info = box.column(align=True)
@@ -424,13 +519,27 @@ def register():
         bpy.utils.register_class(cls)
 
     bpy.types.Object.shape_key_linker_links = CollectionProperty(type=SKL_PG_link)
+    bpy.types.Object.shape_key_linker_live = BoolProperty(
+        name="Live Update",
+        description="Automatically update enabled links when a source mesh changes",
+        default=False,
+        update=_live_toggle_changed,
+    )
+    if _live_depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_live_depsgraph_update)
     bpy.types.DATA_PT_shape_keys.append(_draw_linker_in_shape_keys)
     bpy.types.MESH_MT_shape_key_context_menu.append(_draw_shape_key_menu)
 
 
 def unregister():
+    _LIVE_DIRTY.clear()
+    if bpy.app.timers.is_registered(_run_live_updates):
+        bpy.app.timers.unregister(_run_live_updates)
+    if _live_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_live_depsgraph_update)
     bpy.types.MESH_MT_shape_key_context_menu.remove(_draw_shape_key_menu)
     bpy.types.DATA_PT_shape_keys.remove(_draw_linker_in_shape_keys)
+    del bpy.types.Object.shape_key_linker_live
     del bpy.types.Object.shape_key_linker_links
 
     for cls in reversed(CLASSES):

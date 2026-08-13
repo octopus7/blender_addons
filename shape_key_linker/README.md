@@ -15,6 +15,8 @@
 
 각 연결 오른쪽의 새로고침 버튼을 누르면 해당 쉐이프 키만 업데이트됩니다. 연결은 오브젝트 이름이 아닌 Blender 오브젝트 참조로 `.blend` 파일에 저장되므로 원본이나 쉐이프 키의 이름을 바꿔도 유지됩니다.
 
+**Live Update**를 켜면 원본 메시 변경을 감지해 활성화된 연결을 자동으로 갱신합니다. 토글은 기본적으로 꺼져 있으며, 켜진 동안 버튼이 강조 표시됩니다.
+
 ### 주의사항
 
 - 원본과 대상은 정점 수와 정점 순서가 같은 토폴로지여야 합니다.
@@ -41,6 +43,8 @@ A Blender 4.5+ add-on that links external meshes with identical topology to shap
 
 The refresh button on each link updates only that shape key. Links are stored in the `.blend` file as Blender object references rather than object names, so renaming a source or shape key does not break the link.
 
+Turn on **Live Update** to detect source mesh changes and refresh enabled links automatically. The toggle is off by default and appears highlighted while enabled.
+
 ### Notes
 
 - Source and target meshes must have identical vertex counts and vertex order.
@@ -66,6 +70,8 @@ The refresh button on each link updates only that shape key. Links are stored in
 4. ソースメッシュを編集した後、ターゲットメッシュだけをアクティブにして**Update All**を押します。
 
 各リンク右側の更新ボタンを押すと、そのシェイプキーだけを更新できます。リンクはオブジェクト名ではなくBlenderのオブジェクト参照として`.blend`ファイルに保存されるため、ソースやシェイプキーの名前を変更しても維持されます。
+
+**Live Update**をオンにすると、ソースメッシュの変更を検知して有効なリンクを自動更新します。初期設定はオフで、有効中はボタンが強調表示されます。
 
 ### 注意事項
 

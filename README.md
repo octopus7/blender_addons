@@ -20,7 +20,8 @@ Blender 애드온을 모아 관리하는 저장소입니다.
 4. 원본 메시를 수정한 뒤 대상 메시에서 **Update All**을 누릅니다.
 
 - 각 연결 오른쪽의 새로고침 버튼은 해당 페어만 업데이트합니다.
-- 체크박스를 끄면 해당 연결을 **Update All**에서 제외합니다.
+- **Live Update**를 켜면 원본 메시 변경을 감지해 활성화된 연결을 자동으로 갱신합니다. 기본값은 꺼짐입니다.
+- 체크박스를 끄면 해당 연결을 **Update All**과 **Live Update**에서 제외합니다.
 - `X` 버튼은 쉐이프 키를 유지하고 연결만 해제합니다.
 - 원본과 대상은 정점 수와 정점 순서가 같은 토폴로지여야 합니다.
 
@@ -55,7 +56,7 @@ UV Editor에서 선택한 UV 페이스와 그 아래의 텍스처 픽셀을 함�
 - 같은 날 다시 배포할 경우: `release-YYYY.MM.DD-2`
 - 릴리스 제목: `Blender Add-ons — YYYY.MM.DD`
 
-각 애드온의 실제 버전은 해당 폴더의 `blender_manifest.toml`에서 별도로 관리합니다. 배포 ZIP도 이 값을 사용해 `애드온_ID-버전.zip` 형식으로 생성됩니다. 예: `shape_key_linker-1.1.7.zip`, `uv_pixel_sync-1.0.0.zip`.
+각 애드온의 실제 버전은 해당 폴더의 `blender_manifest.toml`에서 별도로 관리합니다. 배포 ZIP도 이 값을 사용해 `애드온_ID-버전.zip` 형식으로 생성됩니다. 예: `shape_key_linker-1.1.8.zip`, `uv_pixel_sync-1.0.0.zip`.
 
 ### 라이선스
 
@@ -79,7 +80,8 @@ A Blender 4.5+ add-on that links external meshes with identical topology to shap
 4. After editing a source mesh, activate the target mesh and click **Update All**.
 
 - The refresh button on each link updates only that pair.
-- Clear a link's checkbox to exclude it from **Update All**.
+- Turn on **Live Update** to refresh enabled links automatically when a source mesh changes. It is off by default.
+- Clear a link's checkbox to exclude it from **Update All** and **Live Update**.
 - The `X` button removes only the link and preserves the shape key.
 - Source and target meshes must have the same vertex count and vertex order.
 
@@ -114,7 +116,7 @@ Each GitHub release packages all add-ons together, so release tags use a date in
 - Additional release on the same day: `release-YYYY.MM.DD-2`
 - Release title: `Blender Add-ons — YYYY.MM.DD`
 
-Each add-on keeps its own version in `blender_manifest.toml`. Distribution archives use the format `add-on_ID-version.zip`, for example `shape_key_linker-1.1.7.zip` and `uv_pixel_sync-1.0.0.zip`.
+Each add-on keeps its own version in `blender_manifest.toml`. Distribution archives use the format `add-on_ID-version.zip`, for example `shape_key_linker-1.1.8.zip` and `uv_pixel_sync-1.0.0.zip`.
 
 ### License
 
@@ -138,7 +140,8 @@ Blenderアドオンをまとめて管理するリポジトリです。
 4. ソースメッシュを編集した後、ターゲットメッシュで**Update All**を押します。
 
 - 各リンク右側の更新ボタンは、そのペアだけを更新します。
-- チェックを外すと、そのリンクは**Update All**の対象外になります。
+- **Live Update**をオンにすると、ソースメッシュの変更を検知して有効なリンクを自動更新します。初期設定はオフです。
+- チェックを外すと、そのリンクは**Update All**と**Live Update**の対象外になります。
 - `X`ボタンはリンクだけを解除し、シェイプキーは残します。
 - ソースとターゲットは頂点数と頂点順が同じトポロジーである必要があります。
 
@@ -173,7 +176,7 @@ GitHubリリースでは複数のアドオンをまとめて配布するため�
 - 同じ日に再配布する場合: `release-YYYY.MM.DD-2`
 - リリースタイトル: `Blender Add-ons — YYYY.MM.DD`
 
-各アドオンのバージョンは、それぞれの`blender_manifest.toml`で管理します。配布ZIPは`アドオンID-バージョン.zip`形式で生成されます。例: `shape_key_linker-1.1.7.zip`、`uv_pixel_sync-1.0.0.zip`。
+各アドオンのバージョンは、それぞれの`blender_manifest.toml`で管理します。配布ZIPは`アドオンID-バージョン.zip`形式で生成されます。例: `shape_key_linker-1.1.8.zip`、`uv_pixel_sync-1.0.0.zip`。
 
 ### ライセンス
 

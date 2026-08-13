@@ -2,6 +2,7 @@ import importlib
 import sys
 from pathlib import Path
 
+import bmesh
 import bpy
 
 
@@ -10,6 +11,7 @@ if str(ADDON_PARENT) not in sys.path:
     sys.path.insert(0, str(ADDON_PARENT))
 
 addon = importlib.import_module("shape_key_linker")
+implementation = importlib.import_module("shape_key_linker.addon")
 addon.register()
 
 
@@ -37,6 +39,8 @@ link = target.shape_key_linker_links[0]
 assert link.source == source
 assert link.shape_key_name == "Smile"
 assert tuple(target.data.shape_keys.key_blocks["Smile"].data[2].co) == (0.0, 2.0, 0.0)
+assert target.shape_key_linker_live is False
+assert implementation._live_depsgraph_update in bpy.app.handlers.depsgraph_update_post
 
 source.data.vertices[2].co.y = 3.0
 source.name = "SmileRenamed"
@@ -69,6 +73,33 @@ source.data.vertices[2].co.y = 4.5
 result = bpy.ops.object.shape_key_update_linked()
 assert result == {'FINISHED'}
 assert tuple(target.data.shape_keys.key_blocks["Happy"].data[2].co) == (0.0, 4.5, 0.0)
+
+# Live Update is opt-in and refreshes enabled links through the debounced queue.
+target.shape_key_linker_live = True
+implementation._run_live_updates()
+source.data.vertices[2].co.y = 4.75
+source.data.update()
+bpy.context.view_layer.update()
+assert target.as_pointer() in implementation._LIVE_DIRTY
+implementation._run_live_updates()
+assert tuple(target.data.shape_keys.key_blocks["Happy"].data[2].co) == (0.0, 4.75, 0.0)
+
+# Live Update also follows source changes made in Mesh Edit Mode.
+for obj in bpy.context.selected_objects:
+    obj.select_set(False)
+source.select_set(True)
+bpy.context.view_layer.objects.active = source
+bpy.ops.object.mode_set(mode='EDIT')
+edit_mesh = bmesh.from_edit_mesh(source.data)
+edit_mesh.verts.ensure_lookup_table()
+edit_mesh.verts[2].co.y = 4.875
+bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
+bpy.context.view_layer.update()
+assert target.as_pointer() in implementation._LIVE_DIRTY
+implementation._run_live_updates()
+assert tuple(target.data.shape_keys.key_blocks["Happy"].data[2].co) == (0.0, 4.875, 0.0)
+bpy.ops.object.mode_set(mode='OBJECT')
+target.shape_key_linker_live = False
 
 # A topology mismatch must not leave either a link or an orphan shape key.
 bad_source = mesh_object(
