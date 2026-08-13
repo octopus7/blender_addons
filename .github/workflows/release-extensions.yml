@@ -59,12 +59,23 @@ jobs:
         run: |
           set -euo pipefail
           "$BLENDER_ROOT/blender" --background --factory-startup \
+            --python-exit-code 1 \
             --python shape_key_linker/tests/test_shape_key_linker.py
           "$BLENDER_ROOT/blender" --background --factory-startup \
             shape_key_linker/tests/shape_key_linker_test.blend \
+            --python-exit-code 1 \
             --python shape_key_linker/tests/test_reload.py
           rm -f shape_key_linker/tests/shape_key_linker_test.blend \
             shape_key_linker/tests/shape_key_linker_test.blend[0-9]*
+          "$BLENDER_ROOT/blender" --background --factory-startup \
+            --python-exit-code 1 \
+            --python uv_pixel_sync/tests/test_pixel_ops.py
+          "$BLENDER_ROOT/blender" --background --factory-startup \
+            --python-exit-code 1 \
+            --python uv_pixel_sync/tests/test_registration.py
+          "$BLENDER_ROOT/blender" --background --factory-startup \
+            --python-exit-code 1 \
+            --python uv_pixel_sync/tests/test_blender_data.py
 
       - name: Build every extension
         shell: bash

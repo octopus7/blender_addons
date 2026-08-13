@@ -1,0 +1,20 @@
+schema_version = "1.0.0"
+
+id = "uv_pixel_sync"
+version = "1.0.0"
+name = "UV Pixel Sync"
+tagline = "Move selected UVs and their texture pixels together"
+maintainer = "octopus7"
+type = "add-on"
+
+tags = ["UV", "Paint"]
+blender_version_min = "4.5.0"
+license = ["SPDX:MIT"]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  ".*",
+  "*.zip",
+  "tests/",
+]
