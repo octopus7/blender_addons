@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from array import array
+import textwrap
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, IntProperty, PointerProperty, StringProperty
-from bpy.types import Menu, Object, Operator, PropertyGroup, UIList
+from bpy.types import Menu, Object, Operator, PropertyGroup
 
 
 def _active_mesh(context):
@@ -21,15 +22,34 @@ def _shape_keys(target):
     return keys.key_blocks if keys else None
 
 
-def _find_key(target, link):
+def _wrapped_labels(layout, context, text, *, icon='NONE'):
+    """Draw labels with manual wrapping because UILayout.label does not wrap."""
+    region_width = context.region.width if context.region else 300
+    # region.width is already expressed in Blender's UI-scaled coordinates.
+    # Leave room for panel/box padding and an optional leading icon, then use
+    # a conservative average glyph width for the default UI font.
+    available_width = max(100.0, region_width - (72.0 if icon != 'NONE' else 48.0))
+    characters = max(14, int(available_width / 7.0))
+    lines = textwrap.wrap(
+        text,
+        width=characters,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [""]
+    for index, line in enumerate(lines):
+        layout.label(text=line, icon=icon if index == 0 else 'NONE')
+
+
+def _find_key(target, link, *, update_metadata=True):
     key_blocks = _shape_keys(target)
     if not key_blocks:
         return None
 
     key = key_blocks.get(link.shape_key_name)
     if key is not None:
-        link.shape_key_index = key_blocks.find(key.name)
-        link.target_key_count = len(key_blocks)
+        if update_metadata:
+            link.shape_key_index = key_blocks.find(key.name)
+            link.target_key_count = len(key_blocks)
         return key
 
     # A stable index is only trusted when the number of keys has not changed.
@@ -40,7 +60,8 @@ def _find_key(target, link):
         and 0 < link.shape_key_index < len(key_blocks)
     ):
         key = key_blocks[link.shape_key_index]
-        link.shape_key_name = key.name
+        if update_metadata:
+            link.shape_key_name = key.name
         return key
     return None
 
@@ -204,7 +225,6 @@ class SKL_OT_join_and_link(Operator):
                     target.shape_key_linker_links.remove(len(target.shape_key_linker_links) - 1)
 
         if created or updated:
-            target.shape_key_linker_index = max(0, len(target.shape_key_linker_links) - 1)
             message = f"Linked {created} new shape(s)"
             if updated:
                 message += f", updated {updated} existing link(s)"
@@ -259,53 +279,6 @@ class SKL_OT_update_all(Operator):
         return {'FINISHED'} if updated else {'CANCELLED'}
 
 
-class SKL_OT_update_active(Operator):
-    bl_idname = "object.shape_key_update_linked_active"
-    bl_label = "Update Active Shape"
-    bl_description = "Update the active shape key from its linked source"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context):
-        target = _active_mesh(context)
-        return (
-            target is not None
-            and target.mode == 'OBJECT'
-            and target.active_shape_key is not None
-            and len(target.shape_key_linker_links) > 0
-        )
-
-    def execute(self, context):
-        target = _active_mesh(context)
-        active_key = target.active_shape_key
-        if active_key is None:
-            self.report({'ERROR'}, "No active shape key")
-            return {'CANCELLED'}
-
-        active_link = None
-        for link in target.shape_key_linker_links:
-            if _find_key(target, link) == active_key:
-                active_link = link
-                break
-
-        if active_link is None:
-            self.report({'ERROR'}, f"Shape key '{active_key.name}' is not linked")
-            return {'CANCELLED'}
-
-        ok, detail = _update_link(
-            target,
-            active_link,
-            context.evaluated_depsgraph_get(),
-            create_missing=False,
-        )
-        if not ok:
-            self.report({'ERROR'}, detail)
-            return {'CANCELLED'}
-
-        self.report({'INFO'}, f"Updated active shape '{detail}'")
-        return {'FINISHED'}
-
-
 class SKL_OT_update_one(Operator):
     bl_idname = "object.shape_key_update_linked_one"
     bl_label = "Update Linked Shape"
@@ -357,37 +330,32 @@ class SKL_OT_remove_link(Operator):
         if self.index < 0 or self.index >= len(target.shape_key_linker_links):
             return {'CANCELLED'}
         target.shape_key_linker_links.remove(self.index)
-        target.shape_key_linker_index = min(
-            target.shape_key_linker_index,
-            max(0, len(target.shape_key_linker_links) - 1),
-        )
         return {'FINISHED'}
 
 
-class SKL_UL_links(UIList):
-    def draw_item(
-        self, context, layout, data, item, icon, active_data, active_propname, index
-    ):
-        target = data
-        link = item
-        row = layout.row(align=True)
-        row.prop(link, "enabled", text="")
+def _draw_link_row(layout, target, link, index):
+    row = layout.row(align=True)
+    row.use_property_split = False
+    row.use_property_decorate = False
+    row.prop(link, "enabled", text="")
+    source = link.source
+    # Panel drawing must be read-only; Blender can stop drawing the remaining
+    # row when an RNA property is modified from a draw callback.
+    key = _find_key(target, link, update_metadata=False)
+    if source is None or source.type != 'MESH' or key is None:
+        status_icon = 'ERROR'
+    elif len(source.data.vertices) != len(target.data.vertices):
+        status_icon = 'ERROR'
+    else:
+        status_icon = 'LINKED'
 
-        source = link.source
-        key = _find_key(target, link)
-        if source is None or source.type != 'MESH' or key is None:
-            status_icon = 'ERROR'
-        elif len(source.data.vertices) != len(target.data.vertices):
-            status_icon = 'ERROR'
-        else:
-            status_icon = 'LINKED'
-
-        row.prop(link, "source", text="", icon=status_icon)
-        row.label(text=link.shape_key_name or "Missing Shape Key", icon='SHAPEKEY_DATA')
-        op = row.operator("object.shape_key_update_linked_one", text="", icon='FILE_REFRESH')
-        op.index = index
-        op = row.operator("object.shape_key_remove_link", text="", icon='X')
-        op.index = index
+    source_name = source.name if source else (link.source_name or "Missing Source")
+    key_name = key.name if key else (link.shape_key_name or "Missing Shape Key")
+    row.label(text=f"{source_name}  →  {key_name}", icon=status_icon)
+    op = row.operator("object.shape_key_update_linked_one", text="", icon='FILE_REFRESH')
+    op.index = index
+    op = row.operator("object.shape_key_remove_link", text="", icon='X')
+    op.index = index
 
 
 def _draw_linker_in_shape_keys(self, context):
@@ -398,37 +366,47 @@ def _draw_linker_in_shape_keys(self, context):
     layout = self.layout
     layout.separator()
     box = layout.box()
+    # DATA_PT_shape_keys enables split properties and animation decorators.
+    # Do not inherit those settings for this custom compact interface.
+    box.use_property_split = False
+    box.use_property_decorate = False
     box.label(text="Shape Key Linker", icon='LINKED')
 
     buttons = box.column(align=True)
     buttons.operator("object.shape_key_join_and_link", icon='ADD')
-    buttons.operator("object.shape_key_update_linked_active", icon='SHAPEKEY_DATA')
     buttons.operator("object.shape_key_update_linked", text="Update All", icon='FILE_REFRESH')
 
     if not target.shape_key_linker_links:
         info = box.column(align=True)
-        info.label(text="Select source mesh(es), then make target active.", icon='INFO')
-        info.label(text="Join & Link stores the source for later updates.")
+        _wrapped_labels(
+            info,
+            context,
+            "Select source mesh(es), then make the target active.",
+            icon='INFO',
+        )
+        _wrapped_labels(
+            info,
+            context,
+            "Join & Link stores each source for later updates.",
+        )
         return
 
-    box.template_list(
-        "SKL_UL_links",
-        "",
-        target,
-        "shape_key_linker_links",
-        target,
-        "shape_key_linker_index",
-        rows=min(6, max(2, len(target.shape_key_linker_links))),
-    )
+    links_box = box.box()
+    for index, link in enumerate(target.shape_key_linker_links):
+        _draw_link_row(links_box, target, link, index)
 
-    box.label(text="Object transforms are ignored; vertex order must match.", icon='INFO')
+    _wrapped_labels(
+        box,
+        context,
+        "Object transforms are ignored; vertex order must match.",
+        icon='INFO',
+    )
 
 
 def _draw_shape_key_menu(self: Menu, context):
     layout = self.layout
     layout.separator()
     layout.operator("object.shape_key_join_and_link", icon='LINKED')
-    layout.operator("object.shape_key_update_linked_active", icon='SHAPEKEY_DATA')
     layout.operator("object.shape_key_update_linked", icon='FILE_REFRESH')
 
 
@@ -436,10 +414,8 @@ CLASSES = (
     SKL_PG_link,
     SKL_OT_join_and_link,
     SKL_OT_update_all,
-    SKL_OT_update_active,
     SKL_OT_update_one,
     SKL_OT_remove_link,
-    SKL_UL_links,
 )
 
 
@@ -448,7 +424,6 @@ def register():
         bpy.utils.register_class(cls)
 
     bpy.types.Object.shape_key_linker_links = CollectionProperty(type=SKL_PG_link)
-    bpy.types.Object.shape_key_linker_index = IntProperty(default=0)
     bpy.types.DATA_PT_shape_keys.append(_draw_linker_in_shape_keys)
     bpy.types.MESH_MT_shape_key_context_menu.append(_draw_shape_key_menu)
 
@@ -456,7 +431,6 @@ def register():
 def unregister():
     bpy.types.MESH_MT_shape_key_context_menu.remove(_draw_shape_key_menu)
     bpy.types.DATA_PT_shape_keys.remove(_draw_linker_in_shape_keys)
-    del bpy.types.Object.shape_key_linker_index
     del bpy.types.Object.shape_key_linker_links
 
     for cls in reversed(CLASSES):

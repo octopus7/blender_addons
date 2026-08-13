@@ -50,10 +50,9 @@ assert result == {'FINISHED'}
 assert tuple(target.data.shape_keys.key_blocks["Smile"].data[2].co) == (0.0, 3.0, 0.0)
 assert link.source_name == "SmileRenamed"
 
-# Update only the shape selected in Blender's built-in Shape Keys list.
+# The refresh button on a link row updates only that source/key pair.
 source.data.vertices[2].co.y = 3.5
-target.active_shape_key_index = target.data.shape_keys.key_blocks.find("Smile")
-result = bpy.ops.object.shape_key_update_linked_active()
+result = bpy.ops.object.shape_key_update_linked_one(index=0)
 assert result == {'FINISHED'}
 assert tuple(target.data.shape_keys.key_blocks["Smile"].data[2].co) == (0.0, 3.5, 0.0)
 

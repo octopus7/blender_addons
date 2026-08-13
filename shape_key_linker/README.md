@@ -9,7 +9,7 @@ Blender 4.5용 외부 메시-쉐이프 키 연결 애드온입니다.
 3. Object Data Properties의 **Shape Keys** 패널 하단에서 **Join & Link as Shapes**를 누릅니다.
 4. 원본 메시를 수정한 뒤 대상 메시만 활성화하고 **Update All**을 누릅니다.
 
-기본 Shape Keys 목록에서 연결된 키 하나를 선택하고 **Update Active Shape**를 누르면 해당 키만 업데이트됩니다.
+각 연결 오른쪽의 새로고침 버튼을 누르면 해당 쉐이프 키만 업데이트됩니다.
 
 연결은 오브젝트 이름이 아닌 Blender 오브젝트 참조로 `.blend` 파일에 저장됩니다. 원본이나 쉐이프 키의 이름을 바꿔도 연결이 유지됩니다.
 
